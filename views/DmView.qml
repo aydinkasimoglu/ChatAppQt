@@ -1,8 +1,10 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls.Basic
 
-// DmView — direct-message conversation view (Qt 6.11).
+// DmView — direct-message conversation view.
 
 Rectangle {
     id: root
@@ -25,6 +27,10 @@ Rectangle {
         return _palette[name.charCodeAt(0) % _palette.length]
     }
 
+    function _scrollHistoryToBottom() {
+        historyPane.contentY = Math.max(0, historyPane.contentHeight - historyPane.height)
+    }
+
     function _send() {
         const body = messageInput.text.trim()
         if (body.length === 0)
@@ -35,7 +41,7 @@ Rectangle {
             timeLabel: Qt.formatTime(new Date(), "hh:mm")
         })
         messageInput.clear()
-        messageList.positionViewAtEnd()
+        Qt.callLater(root._scrollHistoryToBottom)
         root.messageSent(body)
     }
 
@@ -46,6 +52,7 @@ Rectangle {
         messageModel.clear()
         messageInput.clear()
         messageInput.focus = false
+        Qt.callLater(root._scrollHistoryToBottom)
     }
 
     onVisibleChanged: {
@@ -69,7 +76,7 @@ Rectangle {
         RowLayout {
             id: row
             width: parent.width
-            layoutDirection: bubble.isSelf ? Qt.RightToLeft : Qt.LeftToRight
+            layoutDirection: Qt.LeftToRight
             spacing: 8
 
             Rectangle {
@@ -97,7 +104,7 @@ Rectangle {
                     }
 
                     Text {
-                        Layout.alignment: bubble.isSelf ? Qt.AlignRight : Qt.AlignLeft
+                        Layout.alignment: Qt.AlignLeft
                         text:  bubble.timeLabel
                         color: bubble.isSelf ? Qt.rgba(1, 1, 1, 0.55) : Theme.textSubtle
                         font.pixelSize: 10
@@ -159,75 +166,84 @@ Rectangle {
         Item {
             Layout.fillWidth:  true
             Layout.fillHeight: true
+            clip: true
 
-            // Empty state
-            ColumnLayout {
-                visible: messageModel.count === 0
-                anchors {
-                    left:         parent.left
-                    right:        parent.right
-                    bottom:       parent.bottom
-                    leftMargin:   16
-                    bottomMargin: 16
-                }
-                spacing: 8
+            Flickable {
+                id: historyPane
 
-                Rectangle {
-                    width: 72; height: 72; radius: 36
-                    color: root._avatarColor(root.recipientName)
+                anchors.fill: parent
+                contentWidth: width
+                contentHeight: Math.max(height, historyStack.implicitHeight + historyPane.bottomPadding)
+                boundsBehavior: Flickable.StopAtBounds
+                flickableDirection: Flickable.VerticalFlick
+                clip: true
 
-                    Text {
-                        anchors.centerIn: parent
-                        text:  root.recipientName.charAt(0).toUpperCase()
-                        color: "#ffffff"
-                        font { pixelSize: 28; weight: Font.DemiBold }
+                readonly property real sidePadding:   16
+                readonly property real bottomPadding:  8
+
+                Column {
+                    id: historyStack
+
+                    x: historyPane.sidePadding
+                    y: historyPane.contentHeight - implicitHeight - historyPane.bottomPadding
+                    width: Math.max(0, historyPane.width - historyPane.sidePadding * 2)
+                    spacing: messageModel.count > 0 ? 16 : 0
+
+                    ColumnLayout {
+                        id: introBlock
+
+                        width:   parent.width
+                        spacing: 8
+
+                        Rectangle {
+                            width: 72; height: 72; radius: 36
+                            color: root._avatarColor(root.recipientName)
+
+                            Text {
+                                anchors.centerIn: parent
+                                text:  root.recipientName.charAt(0).toUpperCase()
+                                color: "#ffffff"
+                                font { pixelSize: 28; weight: Font.DemiBold }
+                            }
+                        }
+
+                        Text {
+                            text:  root.recipientName
+                            color: Theme.textPrimary
+                            font { pixelSize: 22; weight: Font.DemiBold }
+                        }
+
+                        Text {
+                            text: qsTr("This is the beginning of your direct message history with <b>%1</b>.").arg(root.recipientName)
+                            color:      Theme.textMuted
+                            font.pixelSize: 14
+                            textFormat: Text.StyledText
+                        }
+                    }
+
+                    ListView {
+                        id: messageList
+
+                        width: parent.width
+                        height: messageModel.count > 0 ? contentHeight : 0
+                        interactive: false
+                        model:   messageModel
+                        spacing: 4
+                        clip:    true
+                        visible: messageModel.count > 0
+
+                        onCountChanged: Qt.callLater(root._scrollHistoryToBottom)
+
+                        delegate: MessageBubble {
+                            width: ListView.view ? ListView.view.width : 0
+                        }
                     }
                 }
 
-                Text {
-                    text:  root.recipientName
-                    color: Theme.textPrimary
-                    font { pixelSize: 22; weight: Font.DemiBold }
-                }
-
-                Text {
-                    text: qsTr("This is the beginning of your direct message history with <b>%1</b>.").arg(root.recipientName)
-                    color:      Theme.textMuted
-                    font.pixelSize: 14
-                    textFormat: Text.StyledText
-                }
-            }
-
-            // Message list
-            ListView {
-                id: messageList
-                anchors {
-                    fill:         parent
-                    leftMargin:   16
-                    rightMargin:  16
-                    topMargin:    8
-                    bottomMargin: 8
-                }
-                visible: messageModel.count > 0
-                model:   messageModel
-                spacing: 4
-                clip:    true
-
-                onCountChanged: Qt.callLater(positionViewAtEnd)
-
                 ScrollBar.vertical: ScrollBar {
-                    policy: ScrollBar.AsNeeded
-                }
-
-                delegate: MessageBubble {
-                    width:     messageList.width
-                    body:      model.body
-                    isSelf:    model.isSelf
-                    timeLabel: model.timeLabel
+                    policy: historyPane.contentHeight > historyPane.height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
                 }
             }
-
-
         }
 
         // ── Input bar ─────────────────────────────────────────────────────
@@ -290,6 +306,10 @@ Rectangle {
                                 event.accepted = true
                             }
                         }
+
+                        Keys.onEscapePressed: (event) => {
+                            messageInput.focus = false
+                        }
                     }
                 }
 
@@ -308,11 +328,17 @@ Rectangle {
                     HoverHandler { id: sendHover }
                     TapHandler   { onTapped: root._send() }
 
-                    Text {
+                    Image {
                         anchors.centerIn: parent
-                        text:  "↑"
-                        color: "#ffffff"
-                        font { pixelSize: 16; weight: Font.Bold }
+                        source: "/assets/icons/arrow_upward.svg"
+                        width: 16
+                        height: 16
+                        sourceSize.width: width * Screen.devicePixelRatio
+                        sourceSize.height: height * Screen.devicePixelRatio
+                        smooth: true
+                        mipmap: true
+                        Layout.preferredWidth: 16
+                        Layout.preferredHeight: 16
                     }
                 }
             }
