@@ -54,6 +54,16 @@ qt_add_qml_module(appChatApp
         Main.qml
         components/AddServerButton.qml
         components/BlurOverlay.qml
+        components/friends/AddFriendPanel.qml
+        components/friends/BlockedUserRow.qml
+        components/friends/FriendAvatar.qml
+        components/friends/FriendRow.qml
+        components/friends/FriendsHeaderBar.qml
+        components/friends/FriendsIconButton.qml
+        components/friends/FriendsListRow.qml
+        components/friends/FriendsTabButton.qml
+        components/friends/FriendsTextButton.qml
+        components/friends/PendingRequestRow.qml
         components/ServerIcon.qml
         components/Toast.qml
         components/ThemedSwitch.qml
