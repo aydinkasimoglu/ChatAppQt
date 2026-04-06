@@ -64,48 +64,33 @@ Item {
                 FriendsView {
                     anchors.fill: parent
                     visible:      root.selectedView === "friends"
-                }
-
-                // DM placeholder (replace with a real chat component later)
-                Rectangle {
-                    anchors.fill: parent
-                    visible:      root.selectedView === "dm"
-                    color:        Theme.surfaceRaised
-
-                    ColumnLayout {
-                        anchors.centerIn: parent
-                        spacing: 8
-
-                        Rectangle {
-                            Layout.alignment: Qt.AlignHCenter
-                            width: 72; height: 72; radius: 36
-                            color: Theme.accentBlue
-
-                            Text {
-                                anchors.centerIn: parent
-                                text:           root.selectedDmName.charAt(0).toUpperCase()
-                                color:          "#ffffff"
-                                font.pixelSize: 28
-                                font.weight:    Font.DemiBold
-                            }
-                        }
-
-                        Text {
-                            Layout.alignment: Qt.AlignHCenter
-                            text:           root.selectedDmName
-                            color:          Theme.textPrimary
-                            font.pixelSize: 22
-                            font.weight:    Font.DemiBold
-                        }
-
-                        Text {
-                            Layout.alignment: Qt.AlignHCenter
-                            text:           "This is the beginning of your direct message history with " + root.selectedDmName + "."
-                            color:          Theme.textMuted
-                            font.pixelSize: 14
-                        }
+                    onDmRequested: (recipientId, recipientName) => {
+                        root.selectedDmId   = recipientId
+                        root.selectedDmName = recipientName
+                        root.selectedView   = "dm"
                     }
                 }
+
+                // DM conversation view
+                DmView {
+                    anchors.fill: parent
+                    visible:      root.selectedView === "dm"
+                    recipientId:   root.selectedDmId
+                    recipientName: root.selectedDmName
+                }
+            }
+        }
+
+        // Click-to-unfocus: observe every mouse press before child controls,
+        // then pass the event through without changing the cursor shape.
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.AllButtons
+            cursorShape: undefined
+
+            onPressed: (mouse) => {
+                mainContent.forceActiveFocus()
+                mouse.accepted = false
             }
         }
     }

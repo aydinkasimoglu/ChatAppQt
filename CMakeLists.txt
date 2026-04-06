@@ -64,6 +64,7 @@ qt_add_qml_module(appChatApp
         components/auth/AuthTextField.qml
         components/dialogs/CreateServerDialog.qml
         views/AuthView.qml
+        views/DmView.qml
         views/FriendsView.qml
         views/LoadingScreen.qml
         views/MainView.qml

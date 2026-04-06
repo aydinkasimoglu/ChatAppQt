@@ -10,6 +10,8 @@ Rectangle {
 
     color: Theme.surfaceRaised
 
+    signal dmRequested(string recipientId, string recipientName)
+
     // ── Active sub-tab ────────────────────────────────────
     property string activeTab: "online"
 
@@ -349,6 +351,7 @@ Rectangle {
 
                     required property int    index
                     required property string friendshipId
+                    required property string userId
                     required property string username
                     required property string email
                     required property bool   isOnline
@@ -450,7 +453,7 @@ Rectangle {
                                 visible: friendHover.hovered
                                 spacing: 8
 
-                                // Message button (placeholder)
+                                // Message button
                                 Item {
                                     width: 36; height: 36
 
@@ -477,7 +480,11 @@ Rectangle {
                                     }
 
                                     HoverHandler { id: msgHover }
-                                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape:  Qt.PointingHandCursor
+                                        onClicked:    root.dmRequested(friendDelegate.userId, friendDelegate.username)
+                                    }
                                 }
 
                                 // Remove friend button
