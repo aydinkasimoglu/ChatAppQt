@@ -1,7 +1,11 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls.Basic
 
 ApplicationWindow {
+    id: appWindow
+
     width: 1280
     height: 720
     minimumWidth: 500
@@ -26,8 +30,10 @@ ApplicationWindow {
 
         function onAuthenticationChanged() {
             console.log("Authentication state changed. Is authenticated:", AuthClient.isAuthenticated)
-            if (!AuthClient.isAuthenticated)
+            if (!AuthClient.isAuthenticated) {
                 PresenceManager.disconnectFromServer()
+                DmManager.resetState()
+            }
         }
 
         function onUserLoaded() {
@@ -36,6 +42,14 @@ ApplicationWindow {
 
         function onUserLoadFailed(message) {
             ToastManager.showError(message)
+        }
+    }
+
+    Connections {
+        target: PresenceManager
+
+        function onDmMessageReceived(conversationId, message) {
+            DmManager.handleIncomingMessage(conversationId, message)
         }
     }
 
@@ -73,6 +87,7 @@ ApplicationWindow {
         id: mainMenuComponent
         MainView {
             anchors.fill: parent
+            windowActive: appWindow.active
         }
     }
 }

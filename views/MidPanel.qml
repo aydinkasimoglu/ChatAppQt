@@ -2,29 +2,27 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 
-// MidPanel: navigation panel showing the Friends shortcut and DM list.
-// Fixed-width; lives between the server rail and the main content area.
-// Emits signals upward; owns no view state beyond tracking the active item.
 Rectangle {
-    id: root
+    id: midPanelRoot
 
-    // ── Public API ────────────────────────────────────────
     signal friendsSelected()
-    signal dmSelected(string dmId, string username)
+    signal dmSelected(string conversationId, string conversationTitle, string directPartnerId)
 
     property string activeItemId: "friends"
 
-    // ── Appearance ────────────────────────────────────────
     width: Theme.midPanelWidth
     color: Theme.surfaceMid
 
-    // ── Placeholder DM list (swap for a real C++ model later) ─
-    ListModel {
-        id: dmModel
-        ListElement { dmId: "dm1"; username: "Alice";   lastMessage: "Hey, how are you?";   avatarColor: "#5865F2" }
-        ListElement { dmId: "dm2"; username: "Bob";     lastMessage: "Did you see that?";    avatarColor: "#23a559" }
-        ListElement { dmId: "dm3"; username: "Charlie"; lastMessage: "Let's catch up!";      avatarColor: "#eb459e" }
-        ListElement { dmId: "dm4"; username: "Diana";   lastMessage: "Thanks!";              avatarColor: "#f2c94c" }
+    readonly property var avatarPalette: [
+        "#5865F2", "#57F287", "#FEE75C", "#EB459E",
+        "#ED4245", "#5DADE2", "#9B59B6", "#23a559"
+    ]
+
+    function avatarColorForName(displayName) {
+        if (!displayName || displayName.length === 0)
+            return avatarPalette[0]
+
+        return avatarPalette[displayName.charCodeAt(0) % avatarPalette.length]
     }
 
     ColumnLayout {
@@ -32,7 +30,6 @@ Rectangle {
         anchors.topMargin: 8
         spacing: 0
 
-        // ── Friends nav item ──────────────────────────────
         Item {
             Layout.fillWidth:       true
             Layout.preferredHeight: 44
@@ -43,7 +40,7 @@ Rectangle {
             Rectangle {
                 anchors.fill: parent
                 radius: 4
-                color: root.activeItemId === "friends"
+                color: midPanelRoot.activeItemId === "friends"
                        ? Theme.surfaceRaised
                        : (friendsHover.hovered ? Qt.rgba(1, 1, 1, 0.06) : "transparent")
                 Behavior on color { ColorAnimation { duration: Theme.animFast } }
@@ -78,7 +75,7 @@ Rectangle {
                 Text {
                     Layout.fillWidth: true
                     text:  "Friends"
-                    color: root.activeItemId === "friends" ? Theme.textPrimary : Theme.textMuted
+                    color: midPanelRoot.activeItemId === "friends" ? Theme.textPrimary : Theme.textMuted
                     font.pixelSize: 15
                     font.weight:    Font.Medium
                     Behavior on color { ColorAnimation { duration: Theme.animFast } }
@@ -90,13 +87,11 @@ Rectangle {
                 anchors.fill: parent
                 cursorShape:  Qt.PointingHandCursor
                 onClicked: {
-                    root.activeItemId = "friends"
-                    root.friendsSelected()
+                    midPanelRoot.friendsSelected()
                 }
             }
         }
 
-        // ── "DIRECT MESSAGES" section header ─────────────
         RowLayout {
             Layout.fillWidth:    true
             Layout.leftMargin:   18
@@ -114,114 +109,168 @@ Rectangle {
                 font.letterSpacing: 0.5
             }
 
-            Item {
-                width: 16; height: 16
-
-                Text {
-                    anchors.centerIn: parent
-                    text:             "+"
-                    color:            plusHover.hovered ? Theme.textPrimary : Theme.textSubtle
-                    font.pixelSize:   16
-                    font.weight:      Font.Light
-                    Behavior on color { ColorAnimation { duration: Theme.animFast } }
-                }
-
-                HoverHandler { id: plusHover }
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape:  Qt.PointingHandCursor
-                }
+            Text {
+                text: DmManager.conversationsLoading
+                      ? "SYNCING"
+                    : qsTr("%1").arg(DmManager.conversations.count)
+                color: Theme.textSubtle
+                font.pixelSize: 10
+                font.weight: Font.DemiBold
+                font.letterSpacing: 0.5
             }
         }
 
-        // ── DM conversation list ──────────────────────────
-        ListView {
+        Item {
             Layout.fillWidth:    true
             Layout.fillHeight:   true
             Layout.leftMargin:   8
             Layout.rightMargin:  8
             Layout.bottomMargin: 8
-            clip:    true
-            spacing: 2
+            clip: true
 
-            model: dmModel
+            ListView {
+                id: dmListView
 
-            delegate: Item {
-                id: dmDelegate
+                anchors.fill: parent
+                clip: true
+                spacing: 2
+                visible: DmManager.conversations.count > 0
+                model: DmManager.conversations
 
-                required property int    index
-                required property string dmId
-                required property string username
-                required property string lastMessage
-                required property string avatarColor
+                delegate: Item {
+                    id: dmDelegate
 
-                width:  ListView.view.width
-                height: 50
+                    required property string conversationId
+                    required property string displayTitle
+                    required property string directPartnerId
+                    required property string lastMessagePreview
+                    required property int unreadCount
+                    required property bool hasUnread
 
-                Rectangle {
-                    anchors.fill: parent
-                    radius: 4
-                    color: root.activeItemId === dmDelegate.dmId
-                           ? Theme.surfaceRaised
-                           : (dmHover.hovered ? Qt.rgba(1, 1, 1, 0.06) : "transparent")
-                    Behavior on color { ColorAnimation { duration: Theme.animFast } }
-                }
+                    width: dmListView.width
+                    height: 56
 
-                RowLayout {
-                    anchors.fill:        parent
-                    anchors.leftMargin:  10
-                    anchors.rightMargin: 10
-                    spacing: 10
-
-                    // Avatar with initial
                     Rectangle {
-                        width: 32; height: 32; radius: 16
-                        color: dmDelegate.avatarColor
+                        anchors.fill: parent
+                        radius: 4
+                        color: midPanelRoot.activeItemId === dmDelegate.conversationId
+                               ? Theme.surfaceRaised
+                               : (dmHover.hovered ? Qt.rgba(1, 1, 1, 0.06) : "transparent")
+                        Behavior on color { ColorAnimation { duration: Theme.animFast } }
+                    }
 
-                        Text {
-                            anchors.centerIn: parent
-                            text:        dmDelegate.username.charAt(0).toUpperCase()
-                            color:       "#ffffff"
-                            font.pixelSize: 14
-                            font.weight:    Font.DemiBold
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 10
+                        anchors.rightMargin: 10
+                        spacing: 10
+
+                        Item {
+                            width: 32
+                            height: 32
+
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: 16
+                                color: midPanelRoot.avatarColorForName(dmDelegate.displayTitle)
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: dmDelegate.displayTitle.charAt(0).toUpperCase()
+                                    color: "#ffffff"
+                                    font.pixelSize: 14
+                                    font.weight: Font.DemiBold
+                                }
+                            }
+
+                            Rectangle {
+                                visible: dmDelegate.directPartnerId.length > 0
+                                         && PresenceManager.isUserOnline(dmDelegate.directPartnerId)
+                                width: 10
+                                height: 10
+                                radius: 5
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                color: "#23a559"
+                                border.width: 2
+                                border.color: Theme.surfaceMid
+                            }
+                        }
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 2
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: dmDelegate.displayTitle
+                                color: midPanelRoot.activeItemId === dmDelegate.conversationId
+                                       ? Theme.textPrimary : Theme.textSecondary
+                                font.pixelSize: 14
+                                font.weight: dmDelegate.hasUnread ? Font.DemiBold : Font.Medium
+                                elide: Text.ElideRight
+                                Behavior on color { ColorAnimation { duration: Theme.animFast } }
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: dmDelegate.lastMessagePreview
+                                color: dmDelegate.hasUnread ? Theme.textMuted : Theme.textSubtle
+                                font.pixelSize: 12
+                                elide: Text.ElideRight
+                            }
+                        }
+
+                        Rectangle {
+                            visible: dmDelegate.unreadCount > 0
+                            Layout.alignment: Qt.AlignVCenter
+                            implicitWidth: Math.max(18, unreadLabel.implicitWidth + 8)
+                            implicitHeight: 18
+                            radius: 9
+                            color: Theme.accentBlue
+
+                            Text {
+                                id: unreadLabel
+                                anchors.centerIn: parent
+                                text: dmDelegate.unreadCount > 99 ? "99+" : qsTr("%1").arg(dmDelegate.unreadCount)
+                                color: "#ffffff"
+                                font.pixelSize: 11
+                                font.weight: Font.DemiBold
+                            }
                         }
                     }
 
-                    // Username + last message preview
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 2
-
-                        Text {
-                            Layout.fillWidth: true
-                            text:  dmDelegate.username
-                            color: root.activeItemId === dmDelegate.dmId
-                                   ? Theme.textPrimary : Theme.textSecondary
-                            font.pixelSize: 14
-                            font.weight:    Font.Medium
-                            elide: Text.ElideRight
-                            Behavior on color { ColorAnimation { duration: Theme.animFast } }
-                        }
-
-                        Text {
-                            Layout.fillWidth: true
-                            text:           dmDelegate.lastMessage
-                            color:          Theme.textSubtle
-                            font.pixelSize: 12
-                            elide:          Text.ElideRight
+                    HoverHandler { id: dmHover }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            midPanelRoot.dmSelected(
+                                dmDelegate.conversationId,
+                                dmDelegate.displayTitle,
+                                dmDelegate.directPartnerId)
                         }
                     }
                 }
+            }
 
-                HoverHandler { id: dmHover }
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape:  Qt.PointingHandCursor
-                    onClicked: {
-                        root.activeItemId = dmDelegate.dmId
-                        root.dmSelected(dmDelegate.dmId, dmDelegate.username)
-                    }
-                }
+            Text {
+                anchors.centerIn: parent
+                visible: DmManager.conversationsLoading && DmManager.conversations.count === 0
+                text: "Loading recent direct messages..."
+                color: Theme.textMuted
+                font.pixelSize: 13
+            }
+
+            Text {
+                anchors.centerIn: parent
+                visible: !DmManager.conversationsLoading && DmManager.conversations.count === 0
+                width: parent.width - 24
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.Wrap
+                text: "Your recent direct messages will appear here once you start chatting."
+                color: Theme.textMuted
+                font.pixelSize: 13
             }
         }
     }

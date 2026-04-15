@@ -4,26 +4,27 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls.Basic
 
-// DmView — direct-message conversation view.
-
 Rectangle {
-    id: root
+    id: dmViewRoot
 
     color: Theme.surfaceRaised
 
-    // ── Public API ────────────────────────────────────────────────────────
-    required property string recipientId
-    required property string recipientName
+    required property string conversationId
+    required property string conversationTitle
 
     signal messageSent(string text)
 
-    // ── Private helpers ───────────────────────────────────────────────────
     readonly property var _palette: [
         "#5865F2", "#57F287", "#FEE75C", "#EB459E",
         "#ED4245", "#5DADE2", "#9B59B6", "#23a559"
     ]
+    readonly property bool hasConversation: conversationTitle.length > 0 || conversationId.length > 0
+    readonly property bool canCompose: conversationId.length > 0
+    property bool autoScrollPending: false
 
-    function _avatarColor(name: string): color {
+    function _avatarColor(name) {
+        if (!name || name.length === 0)
+            return _palette[0]
         return _palette[name.charCodeAt(0) % _palette.length]
     }
 
@@ -31,39 +32,74 @@ Rectangle {
         historyPane.contentY = Math.max(0, historyPane.contentHeight - historyPane.height)
     }
 
-    function _send() {
-        const body = messageInput.text.trim()
-        if (body.length === 0)
-            return
-        messageModel.append({
-            body:      body,
-            isSelf:    true,
-            timeLabel: Qt.formatTime(new Date(), "hh:mm")
-        })
-        messageInput.clear()
-        Qt.callLater(root._scrollHistoryToBottom)
-        root.messageSent(body)
+    function _scrollHistoryToBottomAndAcknowledge() {
+        dmViewRoot._scrollHistoryToBottom()
+        Qt.callLater(dmViewRoot._maybeAcknowledgeVisibleMessages)
     }
 
-    // ── State reactions ───────────────────────────────────────────────────
-    // Clear content when switching conversations, but never steal focus —
-    // the user decides when they want to start typing.
-    onRecipientIdChanged: {
-        messageModel.clear()
+    function _maybeAcknowledgeVisibleMessages() {
+        if (!dmViewRoot.visible
+                || !DmManager.currentConversationReadActive
+                || dmViewRoot.conversationId.length === 0
+                || !historyPane.atBottom) {
+            return
+        }
+
+        DmManager.acknowledgeCurrentConversationMessages()
+    }
+
+    function _send() {
+        const body = messageInput.text.trim()
+        if (body.length === 0 || !canCompose)
+            return
+
+        dmViewRoot.autoScrollPending = historyPane.atBottom || DmManager.messages.count === 0
+        DmManager.sendMessage(body)
+        dmViewRoot.messageSent(body)
+    }
+
+    onConversationIdChanged: {
+        dmViewRoot.autoScrollPending = true
         messageInput.clear()
         messageInput.focus = false
-        Qt.callLater(root._scrollHistoryToBottom)
     }
 
     onVisibleChanged: {
         if (!visible)
             messageInput.focus = false
+
+        Qt.callLater(dmViewRoot._maybeAcknowledgeVisibleMessages)
     }
 
-    // ── Data model ────────────────────────────────────────────────────────
-    ListModel { id: messageModel }
+    Connections {
+        target: DmManager
 
-    // ── Inline component — message bubble ─────────────────────────────────
+        function onMessageSent() {
+            if (!dmViewRoot.visible)
+                return
+
+            messageInput.clear()
+        }
+
+        function onCurrentConversationReadActiveChanged() {
+            Qt.callLater(dmViewRoot._maybeAcknowledgeVisibleMessages)
+        }
+
+        function onMessagesLoadingChanged() {
+            if (!DmManager.messagesLoading && dmViewRoot.autoScrollPending && DmManager.messages.count === 0)
+                dmViewRoot.autoScrollPending = false
+        }
+    }
+
+    Connections {
+        target: DmManager.messages
+
+        function onRowsAboutToBeInserted(parent, first, last) {
+            if (dmViewRoot.visible && historyPane.atBottom)
+                dmViewRoot.autoScrollPending = true
+        }
+    }
+
     component MessageBubble: Item {
         id: bubble
 
@@ -115,12 +151,11 @@ Rectangle {
             Item { Layout.fillWidth: true }
         }
     }
-    // ── Layout ────────────────────────────────────────────────────────────
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
 
-        // ── Top bar ───────────────────────────────────────────────────────
         Rectangle {
             Layout.fillWidth:       true
             Layout.preferredHeight: 48
@@ -142,18 +177,22 @@ Rectangle {
 
                 Rectangle {
                     width: 28; height: 28; radius: 14
-                    color: root._avatarColor(root.recipientName)
+                    color: dmViewRoot._avatarColor(dmViewRoot.conversationTitle)
 
                     Text {
                         anchors.centerIn: parent
-                        text:  root.recipientName.charAt(0).toUpperCase()
+                        text:  dmViewRoot.conversationTitle.length > 0
+                               ? dmViewRoot.conversationTitle.charAt(0).toUpperCase()
+                               : "D"
                         color: "#ffffff"
                         font { pixelSize: 13; weight: Font.DemiBold }
                     }
                 }
 
                 Text {
-                    text:  root.recipientName
+                    text:  dmViewRoot.conversationTitle.length > 0
+                           ? dmViewRoot.conversationTitle
+                           : "Direct Messages"
                     color: Theme.textPrimary
                     font { pixelSize: 15; weight: Font.DemiBold }
                 }
@@ -162,16 +201,24 @@ Rectangle {
             }
         }
 
-        // ── Message history ───────────────────────────────────────────────
         Item {
             Layout.fillWidth:  true
             Layout.fillHeight: true
             clip: true
 
+            Text {
+                anchors.centerIn: parent
+                visible: !dmViewRoot.hasConversation
+                text: "Select a conversation to view your direct message history."
+                color: Theme.textMuted
+                font.pixelSize: 14
+            }
+
             Flickable {
                 id: historyPane
 
                 anchors.fill: parent
+                visible: dmViewRoot.hasConversation
                 contentWidth: width
                 contentHeight: Math.max(height, historyStack.implicitHeight + historyPane.bottomPadding)
                 boundsBehavior: Flickable.StopAtBounds
@@ -180,6 +227,12 @@ Rectangle {
 
                 readonly property real sidePadding:   16
                 readonly property real bottomPadding:  8
+                readonly property bool atBottom: contentY >= Math.max(0, contentHeight - height - 4)
+
+                onAtBottomChanged: {
+                    if (atBottom)
+                        Qt.callLater(dmViewRoot._maybeAcknowledgeVisibleMessages)
+                }
 
                 Column {
                     id: historyStack
@@ -187,7 +240,7 @@ Rectangle {
                     x: historyPane.sidePadding
                     y: historyPane.contentHeight - implicitHeight - historyPane.bottomPadding
                     width: Math.max(0, historyPane.width - historyPane.sidePadding * 2)
-                    spacing: messageModel.count > 0 ? 16 : 0
+                    spacing: DmManager.messages.count > 0 ? 16 : 0
 
                     ColumnLayout {
                         id: introBlock
@@ -197,24 +250,28 @@ Rectangle {
 
                         Rectangle {
                             width: 72; height: 72; radius: 36
-                            color: root._avatarColor(root.recipientName)
+                            color: dmViewRoot._avatarColor(dmViewRoot.conversationTitle)
 
                             Text {
                                 anchors.centerIn: parent
-                                text:  root.recipientName.charAt(0).toUpperCase()
+                                text:  dmViewRoot.conversationTitle.charAt(0).toUpperCase()
                                 color: "#ffffff"
                                 font { pixelSize: 28; weight: Font.DemiBold }
                             }
                         }
 
                         Text {
-                            text:  root.recipientName
+                            text:  dmViewRoot.conversationTitle
                             color: Theme.textPrimary
                             font { pixelSize: 22; weight: Font.DemiBold }
                         }
 
                         Text {
-                            text: qsTr("This is the beginning of your direct message history with <b>%1</b>.").arg(root.recipientName)
+                                    text: DmManager.openingConversation && !dmViewRoot.conversationId.length
+                                  ? qsTr("Starting a direct message with <b>%1</b>...").arg(dmViewRoot.conversationTitle)
+                                        : (DmManager.messagesLoading && DmManager.messages.count === 0
+                                     ? qsTr("Loading your direct message history with <b>%1</b>...").arg(dmViewRoot.conversationTitle)
+                                     : qsTr("This is the beginning of your direct message history with <b>%1</b>.").arg(dmViewRoot.conversationTitle))
                             color:      Theme.textMuted
                             font.pixelSize: 14
                             textFormat: Text.StyledText
@@ -225,19 +282,32 @@ Rectangle {
                         id: messageList
 
                         width: parent.width
-                        height: messageModel.count > 0 ? contentHeight : 0
+                        height: DmManager.messages.count > 0 ? contentHeight : 0
                         interactive: false
-                        model:   messageModel
+                        model:   DmManager.messages
                         spacing: 4
                         clip:    true
-                        visible: messageModel.count > 0
+                        visible: DmManager.messages.count > 0
 
-                        onCountChanged: Qt.callLater(root._scrollHistoryToBottom)
+                        onCountChanged: {
+                            if (DmManager.messages.count > 0 && dmViewRoot.autoScrollPending) {
+                                dmViewRoot.autoScrollPending = false
+                                Qt.callLater(dmViewRoot._scrollHistoryToBottomAndAcknowledge)
+                            }
+                        }
 
                         delegate: MessageBubble {
                             width: ListView.view ? ListView.view.width : 0
                         }
                     }
+                }
+
+                Text {
+                    anchors.centerIn: parent
+                    visible: DmManager.messagesLoading && DmManager.messages.count === 0 && dmViewRoot.conversationId.length > 0
+                    text: "Loading messages..."
+                    color: Theme.textMuted
+                    font.pixelSize: 13
                 }
 
                 ScrollBar.vertical: ScrollBar {
@@ -246,7 +316,6 @@ Rectangle {
             }
         }
 
-        // ── Input bar ─────────────────────────────────────────────────────
         Rectangle {
             Layout.fillWidth:    true
             Layout.leftMargin:   16
@@ -255,6 +324,7 @@ Rectangle {
             implicitHeight: Math.max(44, inputRow.implicitHeight + 12)
             radius: 8
             color:  Theme.surfaceMid
+            opacity: dmViewRoot.canCompose ? 1.0 : 0.72
 
             RowLayout {
                 id: inputRow
@@ -267,7 +337,6 @@ Rectangle {
                 }
                 spacing: 8
 
-                // Wrapper Item owns the height cap and hosts the placeholder.
                 Item {
                     Layout.fillWidth: true
                     Layout.alignment: Qt.AlignVCenter
@@ -275,11 +344,12 @@ Rectangle {
                     readonly property real lineH: messageInput.font.pixelSize * 1.45
                     implicitHeight: Math.min(messageInput.contentHeight, lineH * 5)
 
-                    // Placeholder — only visible when unfocused and empty
                     Text {
                         anchors.fill:          parent
                         visible:               !messageInput.activeFocus && messageInput.length === 0
-                        text:                  qsTr("Message @%1").arg(root.recipientName)
+                        text:                  dmViewRoot.canCompose
+                                               ? qsTr("Message @%1").arg(dmViewRoot.conversationTitle)
+                                               : "Select a conversation to start messaging"
                         color:                 Theme.textSubtle
                         font:                  messageInput.font
                         verticalAlignment:     Text.AlignVCenter
@@ -294,15 +364,15 @@ Rectangle {
                         selectionColor:    "#8a93f7"
                         selectedTextColor: Theme.textPrimary
                         wrapMode:          TextEdit.Wrap
+                        enabled:           dmViewRoot.canCompose
                         activeFocusOnTab:  true
                         clip:              true
-                        // No `focus: true` — input is idle until the user clicks it
 
                         Keys.onReturnPressed: (event) => {
                             if (event.modifiers & Qt.ShiftModifier) {
                                 event.accepted = false
                             } else {
-                                root._send()
+                                dmViewRoot._send()
                                 event.accepted = true
                             }
                         }
@@ -313,11 +383,10 @@ Rectangle {
                     }
                 }
 
-                // Send button — fades in when there is text
                 Rectangle {
                     width: 32; height: 32; radius: 8
 
-                    opacity: messageInput.length > 0 ? 1.0 : 0.0
+                    opacity: dmViewRoot.canCompose && messageInput.length > 0 ? 1.0 : 0.0
                     visible: opacity > 0
 
                     Behavior on opacity { NumberAnimation { duration: 120 } }
@@ -326,7 +395,7 @@ Rectangle {
                     Behavior on color { ColorAnimation { duration: 100 } }
 
                     HoverHandler { id: sendHover }
-                    TapHandler   { onTapped: root._send() }
+                    TapHandler   { onTapped: dmViewRoot._send() }
 
                     Image {
                         anchors.centerIn: parent

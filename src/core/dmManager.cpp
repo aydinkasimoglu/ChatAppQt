@@ -1,0 +1,338 @@
+#include "dmManager.h"
+
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QNetworkReply>
+
+namespace {
+
+QJsonObject decodeJwtPayload(const QString &token)
+{
+    const QStringList parts = token.split('.');
+    if (parts.size() != 3)
+        return {};
+
+    const QByteArray decoded = QByteArray::fromBase64(
+        parts[1].toUtf8(), QByteArray::Base64UrlEncoding);
+    const QJsonDocument document = QJsonDocument::fromJson(decoded);
+    return document.isObject() ? document.object() : QJsonObject{};
+}
+
+QString extractUserIdFromToken(const QString &token)
+{
+    return decodeJwtPayload(token).value("sub").toString();
+}
+
+}
+
+DmManager::DmManager(QObject *parent)
+    : QObject(parent)
+{}
+
+void DmManager::fetchConversations()
+{
+    setConversationsLoading(true);
+
+    QNetworkReply *reply = m_networkClient.get("/conversations?limit=50", true);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        setConversationsLoading(false);
+
+        const JsonObjectResponse response = m_networkClient.jsonResponse<QJsonObject>(
+            reply,
+            QStringLiteral("Couldn't load direct messages."),
+            QStringLiteral("Invalid direct message history response."));
+        if (!response.ok) {
+            emit conversationsLoadFailed(response.errorMessage);
+            return;
+        }
+
+        const QJsonValue itemsValue = response.data.value("items");
+        if (!itemsValue.isArray()) {
+            emit conversationsLoadFailed(QStringLiteral("Invalid direct message history response."));
+            return;
+        }
+
+        m_conversations.reset(itemsValue.toArray(), currentUserId());
+        syncCurrentConversationFromModel();
+    });
+}
+
+void DmManager::openDirectConversation(const QString &userId, const QString &username)
+{
+    if (userId.trimmed().isEmpty()) {
+        emit conversationOpenFailed(QStringLiteral("Invalid DM recipient."));
+        return;
+    }
+
+    const QString existingConversationId = m_conversations.conversationIdForDirectPartner(userId);
+    if (!existingConversationId.isEmpty()) {
+        const QVariantMap conversation = m_conversations.conversationById(existingConversationId);
+        selectConversation(existingConversationId,
+                           conversation.value(QStringLiteral("displayTitle"), username).toString(),
+                           conversation.value(QStringLiteral("directPartnerId"), userId).toString());
+        return;
+    }
+
+    setCurrentConversation(QString(), username, userId);
+    m_messages.clear();
+    setOpeningConversation(true);
+
+    QJsonObject payload;
+    payload["participant_ids"] = QJsonArray{ userId };
+
+    QNetworkReply *reply = m_networkClient.post("/conversations", payload, true);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, userId, username]() {
+        reply->deleteLater();
+        setOpeningConversation(false);
+
+        const JsonObjectResponse response = m_networkClient.jsonResponse<QJsonObject>(
+            reply,
+            QStringLiteral("Couldn't open direct message."),
+            QStringLiteral("Invalid direct message response."));
+        if (!response.ok) {
+            setCurrentConversation(QString(), QString(), QString());
+            m_messages.clear();
+            emit conversationOpenFailed(response.errorMessage);
+            return;
+        }
+
+        const QString conversationId = response.data.value("conversation_id").toString();
+        if (conversationId.isEmpty()) {
+            setCurrentConversation(QString(), QString(), QString());
+            m_messages.clear();
+            emit conversationOpenFailed(QStringLiteral("Invalid direct message response."));
+            return;
+        }
+
+        const QString title = response.data.value("display_title").toString(username);
+        const QString directPartnerId = response.data.value("direct_partner_id").toString(userId);
+
+        setCurrentConversation(conversationId, title, directPartnerId);
+        loadMessages(conversationId);
+        fetchConversations();
+    });
+}
+
+void DmManager::selectConversation(const QString &conversationId,
+                                   const QString &title,
+                                   const QString &directPartnerId)
+{
+    if (conversationId.trimmed().isEmpty())
+        return;
+
+    setOpeningConversation(false);
+    setCurrentConversation(conversationId, title, directPartnerId);
+    m_messages.clear();
+    loadMessages(conversationId);
+}
+
+void DmManager::setCurrentConversationReadActive(bool active)
+{
+    if (m_currentConversationReadActive == active)
+        return;
+
+    m_currentConversationReadActive = active;
+    emit currentConversationReadActiveChanged();
+}
+
+void DmManager::acknowledgeCurrentConversationMessages()
+{
+    if (!m_currentConversationReadActive || m_currentConversationId.isEmpty())
+        return;
+
+    const QString latestMessageId = m_messages.latestMessageId();
+    if (latestMessageId.isEmpty())
+        return;
+
+    markConversationRead(m_currentConversationId, latestMessageId);
+}
+
+void DmManager::sendMessage(const QString &text)
+{
+    const QString content = text.trimmed();
+    if (content.isEmpty())
+        return;
+
+    if (m_currentConversationId.isEmpty()) {
+        emit messageSendFailed(QStringLiteral("No direct message is selected."));
+        return;
+    }
+
+    const QString conversationId = m_currentConversationId;
+    QJsonObject payload;
+    payload["content"] = content;
+
+    QNetworkReply *reply = m_networkClient.post(
+        QStringLiteral("/conversations/") + conversationId + QStringLiteral("/messages"),
+        payload,
+        true);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, conversationId]() {
+        reply->deleteLater();
+
+        const JsonObjectResponse response = m_networkClient.jsonResponse<QJsonObject>(
+            reply,
+            QStringLiteral("Couldn't send direct message."),
+            QStringLiteral("Invalid direct message response."));
+        if (!response.ok) {
+            emit messageSendFailed(response.errorMessage);
+            return;
+        }
+
+        if (conversationId == m_currentConversationId)
+            m_messages.append(response.data, currentUserId());
+
+        fetchConversations();
+        emit messageSent();
+    });
+}
+
+void DmManager::handleIncomingMessage(const QString &conversationId, const QVariantMap &message)
+{
+    fetchConversations();
+
+    if (conversationId != m_currentConversationId)
+        return;
+
+    m_messages.append(message, currentUserId());
+}
+
+void DmManager::resetState()
+{
+    setCurrentConversationReadActive(false);
+    setOpeningConversation(false);
+    setConversationsLoading(false);
+    setMessagesLoading(false);
+    setCurrentConversation(QString(), QString(), QString());
+    m_conversations.clear();
+    m_messages.clear();
+}
+
+void DmManager::loadMessages(const QString &conversationId)
+{
+    if (conversationId.isEmpty()) {
+        m_messages.clear();
+        return;
+    }
+
+    setMessagesLoading(true);
+
+    QNetworkReply *reply = m_networkClient.get(
+        QStringLiteral("/conversations/") + conversationId + QStringLiteral("/messages?limit=50"),
+        true);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, conversationId]() {
+        reply->deleteLater();
+
+        if (conversationId != m_currentConversationId) {
+            setMessagesLoading(false);
+            return;
+        }
+
+        setMessagesLoading(false);
+
+        const JsonObjectResponse response = m_networkClient.jsonResponse<QJsonObject>(
+            reply,
+            QStringLiteral("Couldn't load direct message history."),
+            QStringLiteral("Invalid direct message history response."));
+        if (!response.ok) {
+            emit messagesLoadFailed(response.errorMessage);
+            return;
+        }
+
+        const QJsonValue itemsValue = response.data.value("items");
+        if (!itemsValue.isArray()) {
+            emit messagesLoadFailed(QStringLiteral("Invalid direct message history response."));
+            return;
+        }
+
+        const QJsonArray items = itemsValue.toArray();
+        m_messages.reset(items, currentUserId());
+    });
+}
+
+void DmManager::markConversationRead(const QString &conversationId, const QString &messageId)
+{
+    if (conversationId.isEmpty() || messageId.isEmpty())
+        return;
+
+    QJsonObject payload;
+    payload["up_to_message_id"] = messageId;
+
+    QNetworkReply *reply = m_networkClient.patch(
+        QStringLiteral("/conversations/") + conversationId + QStringLiteral("/read"),
+        payload,
+        true);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+
+        const NetworkResponse response = m_networkClient.response(reply);
+        if (!response.ok)
+            return;
+
+        fetchConversations();
+    });
+}
+
+void DmManager::setConversationsLoading(bool loading)
+{
+    if (m_conversationsLoading == loading)
+        return;
+
+    m_conversationsLoading = loading;
+    emit conversationsLoadingChanged();
+}
+
+void DmManager::setMessagesLoading(bool loading)
+{
+    if (m_messagesLoading == loading)
+        return;
+
+    m_messagesLoading = loading;
+    emit messagesLoadingChanged();
+}
+
+void DmManager::setOpeningConversation(bool loading)
+{
+    if (m_openingConversation == loading)
+        return;
+
+    m_openingConversation = loading;
+    emit openingConversationChanged();
+}
+
+void DmManager::setCurrentConversation(const QString &conversationId,
+                                       const QString &title,
+                                       const QString &directPartnerId)
+{
+    if (m_currentConversationId == conversationId
+        && m_currentConversationTitle == title
+        && m_currentDirectPartnerId == directPartnerId) {
+        return;
+    }
+
+    m_currentConversationId = conversationId;
+    m_currentConversationTitle = title;
+    m_currentDirectPartnerId = directPartnerId;
+    emit currentConversationChanged();
+}
+
+void DmManager::syncCurrentConversationFromModel()
+{
+    if (m_currentConversationId.isEmpty())
+        return;
+
+    const QVariantMap conversation = m_conversations.conversationById(m_currentConversationId);
+    if (conversation.isEmpty())
+        return;
+
+    setCurrentConversation(
+        m_currentConversationId,
+        conversation.value(QStringLiteral("displayTitle"), m_currentConversationTitle).toString(),
+        conversation.value(QStringLiteral("directPartnerId"), m_currentDirectPartnerId).toString());
+}
+
+QString DmManager::currentUserId() const
+{
+    return extractUserIdFromToken(NetworkClient::accessToken());
+}

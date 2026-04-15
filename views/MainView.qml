@@ -8,10 +8,41 @@ Item {
     id: root
 
     // ── Shared state ──────────────────────────────────────
-    property bool   dialogOpen:     false
-    property string selectedView:   "friends"   // "friends" | "dm"
-    property string selectedDmId:   ""
-    property string selectedDmName: ""
+    property bool   dialogOpen:   false
+    property string selectedView: "friends"   // "friends" | "dm"
+    property bool   windowActive: false
+
+    readonly property bool dmReadActive: root.selectedView === "dm" && root.windowActive
+
+    Component.onCompleted: {
+        DmManager.fetchConversations()
+        DmManager.currentConversationReadActive = root.dmReadActive
+    }
+
+    Component.onDestruction: DmManager.currentConversationReadActive = false
+
+    onDmReadActiveChanged: DmManager.currentConversationReadActive = root.dmReadActive
+
+    Connections {
+        target: DmManager
+
+        function onConversationsLoadFailed(message) {
+            ToastManager.showError(message)
+        }
+
+        function onConversationOpenFailed(message) {
+            root.selectedView = "friends"
+            ToastManager.showError(message)
+        }
+
+        function onMessagesLoadFailed(message) {
+            ToastManager.showError(message)
+        }
+
+        function onMessageSendFailed(message) {
+            ToastManager.showError(message)
+        }
+    }
 
     // ── Main content (blurred when dialog opens) ──────────
     Item {
@@ -42,16 +73,13 @@ Item {
             MidPanel {
                 id: midPanel
                 Layout.fillHeight: true
-                activeItemId: root.selectedView === "friends" ? "friends" : root.selectedDmId
+                activeItemId: root.selectedView === "friends" ? "friends" : DmManager.currentConversationId
                 onFriendsSelected: {
-                    root.selectedView   = "friends"
-                    root.selectedDmId   = ""
-                    root.selectedDmName = ""
+                    root.selectedView = "friends"
                 }
-                onDmSelected: (dmId, username) => {
-                    root.selectedDmId   = dmId
-                    root.selectedDmName = username
-                    root.selectedView   = "dm"
+                onDmSelected: (conversationId, conversationTitle, directPartnerId) => {
+                    root.selectedView = "dm"
+                    DmManager.selectConversation(conversationId, conversationTitle, directPartnerId)
                 }
             }
 
@@ -65,9 +93,8 @@ Item {
                     anchors.fill: parent
                     visible:      root.selectedView === "friends"
                     onDmRequested: (recipientId, recipientName) => {
-                        root.selectedDmId   = recipientId
-                        root.selectedDmName = recipientName
-                        root.selectedView   = "dm"
+                        root.selectedView = "dm"
+                        DmManager.openDirectConversation(recipientId, recipientName)
                     }
                 }
 
@@ -75,8 +102,8 @@ Item {
                 DmView {
                     anchors.fill: parent
                     visible:      root.selectedView === "dm"
-                    recipientId:   root.selectedDmId
-                    recipientName: root.selectedDmName
+                    conversationId:    DmManager.currentConversationId
+                    conversationTitle: DmManager.currentConversationTitle
                 }
             }
         }

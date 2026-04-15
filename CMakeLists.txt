@@ -34,6 +34,8 @@ qt_add_qml_module(appChatApp
     SOURCES
         src/core/authClient.cpp
         src/core/authClient.h
+        src/core/dmManager.cpp
+        src/core/dmManager.h
         src/core/networkClient.cpp
         src/core/networkClient.h
         src/core/serverManager.cpp
@@ -44,6 +46,10 @@ qt_add_qml_module(appChatApp
         src/core/presenceManager.h
         src/models/friendListModel.cpp
         src/models/friendListModel.h
+        src/models/dmConversationListModel.cpp
+        src/models/dmConversationListModel.h
+        src/models/dmMessageListModel.cpp
+        src/models/dmMessageListModel.h
         src/models/pendingRequestModel.cpp
         src/models/pendingRequestModel.h
         src/models/blockListModel.cpp

@@ -27,6 +27,14 @@ QNetworkReply *NetworkClient::post(const QString &path, const QJsonObject &paylo
     return m_networkManager->post(makeRequest(path, withAuth), QJsonDocument(payload).toJson());
 }
 
+QNetworkReply *NetworkClient::patch(const QString &path, const QJsonObject &payload, bool withAuth)
+{
+    return m_networkManager->sendCustomRequest(
+        makeRequest(path, withAuth),
+        "PATCH",
+        QJsonDocument(payload).toJson());
+}
+
 QNetworkReply *NetworkClient::put(const QString &path, const QJsonObject &payload, bool withAuth)
 {
     return m_networkManager->put(makeRequest(path, withAuth), QJsonDocument(payload).toJson());

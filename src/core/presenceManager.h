@@ -6,6 +6,7 @@
 #include <QTimer>
 #include <QSet>
 #include <QJsonArray>
+#include <QVariantMap>
 #include <QJSEngine>
 #include <QQmlEngine>
 #include <qqmlintegration.h>
@@ -37,6 +38,7 @@ signals:
     void userWentOnline(const QString &userId);
     void userWentOffline(const QString &userId);
     void onlineUsersChanged();
+    void dmMessageReceived(const QString &conversationId, const QVariantMap &message);
 
 private slots:
     void onWsConnected();

@@ -128,6 +128,10 @@ void PresenceManager::onWsTextMessage(const QString &message)
             obj.value("user_id").toString(),
             obj.value("username").toString(),
             obj.value("status").toString());
+    } else if (type == "new_message") {
+        emit dmMessageReceived(
+            obj.value("conversation_id").toString(),
+            obj.value("message").toObject().toVariantMap());
     }
 }
 

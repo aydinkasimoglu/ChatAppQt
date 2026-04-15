@@ -43,6 +43,7 @@ public:
 
     QNetworkReply *get(const QString &path, bool withAuth = false);
     QNetworkReply *post(const QString &path, const QJsonObject &payload, bool withAuth = false);
+    QNetworkReply *patch(const QString &path, const QJsonObject &payload, bool withAuth = false);
     QNetworkReply *put(const QString &path, const QJsonObject &payload, bool withAuth = false);
     QNetworkReply *deleteResource(const QString &path, bool withAuth = false);
     NetworkResponse response(QNetworkReply *reply, const QString &fallbackMessage = QString()) const;
