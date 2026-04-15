@@ -25,6 +25,8 @@ class DmManager : public QObject
     Q_PROPERTY(bool currentConversationReadActive READ currentConversationReadActive WRITE setCurrentConversationReadActive NOTIFY currentConversationReadActiveChanged)
     Q_PROPERTY(bool conversationsLoading READ conversationsLoading NOTIFY conversationsLoadingChanged)
     Q_PROPERTY(bool messagesLoading READ messagesLoading NOTIFY messagesLoadingChanged)
+    Q_PROPERTY(bool loadingOlderMessages READ loadingOlderMessages NOTIFY loadingOlderMessagesChanged)
+    Q_PROPERTY(bool historyStartReached READ historyStartReached NOTIFY historyStartReachedChanged)
     Q_PROPERTY(bool openingConversation READ openingConversation NOTIFY openingConversationChanged)
 
 public:
@@ -42,6 +44,8 @@ public:
 
     bool conversationsLoading() const { return m_conversationsLoading; }
     bool messagesLoading() const { return m_messagesLoading; }
+    bool loadingOlderMessages() const { return m_loadingOlderMessages; }
+    bool historyStartReached() const { return m_historyStartReached; }
     bool openingConversation() const { return m_openingConversation; }
 
     Q_INVOKABLE void fetchConversations();
@@ -50,6 +54,7 @@ public:
                                         const QString &title,
                                         const QString &directPartnerId);
     Q_INVOKABLE void acknowledgeCurrentConversationMessages();
+    Q_INVOKABLE void loadOlderMessages();
     Q_INVOKABLE void sendMessage(const QString &text);
     Q_INVOKABLE void handleIncomingMessage(const QString &conversationId,
                                            const QVariantMap &message);
@@ -60,6 +65,8 @@ signals:
     void currentConversationReadActiveChanged();
     void conversationsLoadingChanged();
     void messagesLoadingChanged();
+    void loadingOlderMessagesChanged();
+    void historyStartReachedChanged();
     void openingConversationChanged();
 
     void conversationsLoadFailed(QString message);
@@ -72,9 +79,12 @@ private:
     void loadMessages(const QString &conversationId);
     void markConversationRead(const QString &conversationId, const QString &messageId);
     void setCurrentConversationReadActive(bool active);
+    void resetMessagePaginationState();
 
     void setConversationsLoading(bool loading);
     void setMessagesLoading(bool loading);
+    void setLoadingOlderMessages(bool loading);
+    void setHistoryStartReached(bool reached);
     void setOpeningConversation(bool loading);
     void setCurrentConversation(const QString &conversationId,
                                 const QString &title,
@@ -90,9 +100,12 @@ private:
     QString m_currentConversationId;
     QString m_currentConversationTitle;
     QString m_currentDirectPartnerId;
+    QString m_nextBeforeMessageId;
     bool m_currentConversationReadActive = false;
     bool m_conversationsLoading = false;
     bool m_messagesLoading = false;
+    bool m_loadingOlderMessages = false;
+    bool m_historyStartReached = false;
     bool m_openingConversation = false;
 };
 

@@ -242,8 +242,10 @@ Rectangle {
 
                     HoverHandler { id: dmHover }
                     MouseArea {
+                        id: dmMouseArea
                         anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
+                        enabled: midPanelRoot.activeItemId !== dmDelegate.conversationId
+                        cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                         onClicked: {
                             midPanelRoot.dmSelected(
                                 dmDelegate.conversationId,

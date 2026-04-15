@@ -7,6 +7,8 @@
 
 namespace {
 
+constexpr int MessagePageSize = 50;
+
 QJsonObject decodeJwtPayload(const QString &token)
 {
     const QStringList parts = token.split('.');
@@ -122,6 +124,11 @@ void DmManager::selectConversation(const QString &conversationId,
     if (conversationId.trimmed().isEmpty())
         return;
 
+    if (conversationId == m_currentConversationId) {
+        setCurrentConversation(conversationId, title, directPartnerId);
+        return;
+    }
+
     setOpeningConversation(false);
     setCurrentConversation(conversationId, title, directPartnerId);
     m_messages.clear();
@@ -147,6 +154,68 @@ void DmManager::acknowledgeCurrentConversationMessages()
         return;
 
     markConversationRead(m_currentConversationId, latestMessageId);
+}
+
+void DmManager::loadOlderMessages()
+{
+    if (m_currentConversationId.isEmpty()
+        || m_messagesLoading
+        || m_loadingOlderMessages
+        || m_historyStartReached) {
+        return;
+    }
+
+    if (m_nextBeforeMessageId.isEmpty()) {
+        setHistoryStartReached(true);
+        return;
+    }
+
+    const QString conversationId = m_currentConversationId;
+    const QString beforeMessageId = m_nextBeforeMessageId;
+
+    setLoadingOlderMessages(true);
+
+    QNetworkReply *reply = m_networkClient.get(
+        QStringLiteral("/conversations/%1/messages?limit=%2&before_message_id=%3")
+            .arg(conversationId)
+            .arg(MessagePageSize)
+            .arg(beforeMessageId),
+        true);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, conversationId]() {
+        reply->deleteLater();
+
+        if (conversationId != m_currentConversationId) {
+            setLoadingOlderMessages(false);
+            return;
+        }
+
+        setLoadingOlderMessages(false);
+
+        const JsonObjectResponse response = m_networkClient.jsonResponse<QJsonObject>(
+            reply,
+            QStringLiteral("Couldn't load older direct messages."),
+            QStringLiteral("Invalid direct message history response."));
+        if (!response.ok) {
+            emit messagesLoadFailed(response.errorMessage);
+            return;
+        }
+
+        const QJsonValue itemsValue = response.data.value("items");
+        if (!itemsValue.isArray()) {
+            emit messagesLoadFailed(QStringLiteral("Invalid direct message history response."));
+            return;
+        }
+
+        const QJsonArray items = itemsValue.toArray();
+        const bool reachedStart = items.size() < MessagePageSize;
+        setHistoryStartReached(reachedStart);
+        m_nextBeforeMessageId = reachedStart
+            ? QString()
+            : response.data.value("next_before_message_id").toString();
+
+        if (!items.isEmpty())
+            m_messages.prepend(items, currentUserId());
+    });
 }
 
 void DmManager::sendMessage(const QString &text)
@@ -204,6 +273,7 @@ void DmManager::resetState()
     setOpeningConversation(false);
     setConversationsLoading(false);
     setMessagesLoading(false);
+    resetMessagePaginationState();
     setCurrentConversation(QString(), QString(), QString());
     m_conversations.clear();
     m_messages.clear();
@@ -212,14 +282,17 @@ void DmManager::resetState()
 void DmManager::loadMessages(const QString &conversationId)
 {
     if (conversationId.isEmpty()) {
+        resetMessagePaginationState();
         m_messages.clear();
         return;
     }
 
+    resetMessagePaginationState();
     setMessagesLoading(true);
 
     QNetworkReply *reply = m_networkClient.get(
-        QStringLiteral("/conversations/") + conversationId + QStringLiteral("/messages?limit=50"),
+        QStringLiteral("/conversations/") + conversationId
+            + QStringLiteral("/messages?limit=%1").arg(MessagePageSize),
         true);
     connect(reply, &QNetworkReply::finished, this, [this, reply, conversationId]() {
         reply->deleteLater();
@@ -247,6 +320,11 @@ void DmManager::loadMessages(const QString &conversationId)
         }
 
         const QJsonArray items = itemsValue.toArray();
+        const bool reachedStart = items.size() < MessagePageSize;
+        setHistoryStartReached(reachedStart);
+        m_nextBeforeMessageId = reachedStart
+            ? QString()
+            : response.data.value("next_before_message_id").toString();
         m_messages.reset(items, currentUserId());
     });
 }
@@ -292,6 +370,24 @@ void DmManager::setMessagesLoading(bool loading)
     emit messagesLoadingChanged();
 }
 
+void DmManager::setLoadingOlderMessages(bool loading)
+{
+    if (m_loadingOlderMessages == loading)
+        return;
+
+    m_loadingOlderMessages = loading;
+    emit loadingOlderMessagesChanged();
+}
+
+void DmManager::setHistoryStartReached(bool reached)
+{
+    if (m_historyStartReached == reached)
+        return;
+
+    m_historyStartReached = reached;
+    emit historyStartReachedChanged();
+}
+
 void DmManager::setOpeningConversation(bool loading)
 {
     if (m_openingConversation == loading)
@@ -330,6 +426,13 @@ void DmManager::syncCurrentConversationFromModel()
         m_currentConversationId,
         conversation.value(QStringLiteral("displayTitle"), m_currentConversationTitle).toString(),
         conversation.value(QStringLiteral("directPartnerId"), m_currentDirectPartnerId).toString());
+}
+
+void DmManager::resetMessagePaginationState()
+{
+    m_nextBeforeMessageId.clear();
+    setLoadingOlderMessages(false);
+    setHistoryStartReached(false);
 }
 
 QString DmManager::currentUserId() const

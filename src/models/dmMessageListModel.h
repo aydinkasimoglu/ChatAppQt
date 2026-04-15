@@ -34,6 +34,7 @@ public:
     QHash<int, QByteArray> roleNames() const override;
 
     void reset(const QJsonArray &messages, const QString &currentUserId);
+    void prepend(const QJsonArray &messages, const QString &currentUserId);
     void append(const QJsonObject &message, const QString &currentUserId);
     void append(const QVariantMap &message, const QString &currentUserId);
     void clear();

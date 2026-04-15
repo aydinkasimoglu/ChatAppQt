@@ -80,6 +80,31 @@ void DmMessageListModel::reset(const QJsonArray &messages, const QString &curren
     endResetModel();
 }
 
+void DmMessageListModel::prepend(const QJsonArray &messages, const QString &currentUserId)
+{
+    if (messages.isEmpty())
+        return;
+
+    QList<MessageItem> pageItems;
+    pageItems.reserve(messages.size());
+
+    for (int index = messages.size() - 1; index >= 0; --index) {
+        const QJsonValue value = messages.at(index);
+        if (!value.isObject())
+            continue;
+
+        pageItems.append(messageFromJson(value.toObject(), currentUserId));
+    }
+
+    if (pageItems.isEmpty())
+        return;
+
+    beginInsertRows({}, 0, pageItems.size() - 1);
+    for (int index = pageItems.size() - 1; index >= 0; --index)
+        m_messages.prepend(pageItems.at(index));
+    endInsertRows();
+}
+
 void DmMessageListModel::append(const QJsonObject &message, const QString &currentUserId)
 {
     const QString messageId = message.value("message_id").toString();

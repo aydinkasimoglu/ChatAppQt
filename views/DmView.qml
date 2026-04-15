@@ -21,6 +21,9 @@ Rectangle {
     readonly property bool hasConversation: conversationTitle.length > 0 || conversationId.length > 0
     readonly property bool canCompose: conversationId.length > 0
     property bool autoScrollPending: false
+    property bool prependCompensationPending: false
+    property real prependReferenceContentHeight: 0
+    property real prependReferenceContentY: 0
 
     function _avatarColor(name) {
         if (!name || name.length === 0)
@@ -35,6 +38,32 @@ Rectangle {
     function _scrollHistoryToBottomAndAcknowledge() {
         dmViewRoot._scrollHistoryToBottom()
         Qt.callLater(dmViewRoot._maybeAcknowledgeVisibleMessages)
+    }
+
+    function _requestOlderMessagesIfNeeded() {
+        if (!dmViewRoot.visible
+                || dmViewRoot.conversationId.length === 0
+                || DmManager.messagesLoading
+                || DmManager.loadingOlderMessages
+                || DmManager.historyStartReached
+                || historyPane.contentY > 4) {
+            return
+        }
+
+        dmViewRoot.prependCompensationPending = true
+        dmViewRoot.prependReferenceContentHeight = historyPane.contentHeight
+        dmViewRoot.prependReferenceContentY = historyPane.contentY
+        DmManager.loadOlderMessages()
+    }
+
+    function _restoreViewportAfterPrepend() {
+        if (!dmViewRoot.prependCompensationPending)
+            return
+
+        dmViewRoot.prependCompensationPending = false
+
+        const heightDelta = historyPane.contentHeight - dmViewRoot.prependReferenceContentHeight
+        historyPane.contentY = Math.max(0, dmViewRoot.prependReferenceContentY + heightDelta)
     }
 
     function _maybeAcknowledgeVisibleMessages() {
@@ -60,6 +89,7 @@ Rectangle {
 
     onConversationIdChanged: {
         dmViewRoot.autoScrollPending = true
+        dmViewRoot.prependCompensationPending = false
         messageInput.clear()
         messageInput.focus = false
     }
@@ -85,9 +115,13 @@ Rectangle {
             Qt.callLater(dmViewRoot._maybeAcknowledgeVisibleMessages)
         }
 
-        function onMessagesLoadingChanged() {
-            if (!DmManager.messagesLoading && dmViewRoot.autoScrollPending && DmManager.messages.count === 0)
-                dmViewRoot.autoScrollPending = false
+        function onLoadingOlderMessagesChanged() {
+            if (!DmManager.loadingOlderMessages && dmViewRoot.prependCompensationPending) {
+                Qt.callLater(function() {
+                    if (dmViewRoot.prependCompensationPending)
+                        dmViewRoot.prependCompensationPending = false
+                })
+            }
         }
     }
 
@@ -97,6 +131,11 @@ Rectangle {
         function onRowsAboutToBeInserted(parent, first, last) {
             if (dmViewRoot.visible && historyPane.atBottom)
                 dmViewRoot.autoScrollPending = true
+        }
+
+        function onRowsInserted(parent, first, last) {
+            if (first === 0 && dmViewRoot.prependCompensationPending)
+                Qt.callLater(dmViewRoot._restoreViewportAfterPrepend)
         }
     }
 
@@ -234,6 +273,11 @@ Rectangle {
                         Qt.callLater(dmViewRoot._maybeAcknowledgeVisibleMessages)
                 }
 
+                onContentYChanged: {
+                    if (contentY <= 4)
+                        Qt.callLater(dmViewRoot._requestOlderMessagesIfNeeded)
+                }
+
                 Column {
                     id: historyStack
 
@@ -242,39 +286,51 @@ Rectangle {
                     width: Math.max(0, historyPane.width - historyPane.sidePadding * 2)
                     spacing: DmManager.messages.count > 0 ? 16 : 0
 
-                    ColumnLayout {
-                        id: introBlock
+                    Text {
+                        width: parent.width
+                        visible: DmManager.loadingOlderMessages
+                        horizontalAlignment: Text.AlignHCenter
+                        text: "Loading older messages..."
+                        color: Theme.textMuted
+                        font.pixelSize: 12
+                    }
 
-                        width:   parent.width
-                        spacing: 8
+                    Loader {
+                        active: DmManager.historyStartReached && dmViewRoot.hasConversation
+                        width: parent.width
 
-                        Rectangle {
-                            width: 72; height: 72; radius: 36
-                            color: dmViewRoot._avatarColor(dmViewRoot.conversationTitle)
+                        sourceComponent: Component {
+                            ColumnLayout {
+                                width: historyStack.width
+                                spacing: 8
 
-                            Text {
-                                anchors.centerIn: parent
-                                text:  dmViewRoot.conversationTitle.charAt(0).toUpperCase()
-                                color: "#ffffff"
-                                font { pixelSize: 28; weight: Font.DemiBold }
+                                Rectangle {
+                                    width: 72; height: 72; radius: 36
+                                    color: dmViewRoot._avatarColor(dmViewRoot.conversationTitle)
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: dmViewRoot.conversationTitle.charAt(0).toUpperCase()
+                                        color: "#ffffff"
+                                        font { pixelSize: 28; weight: Font.DemiBold }
+                                    }
+                                }
+
+                                Text {
+                                    text: dmViewRoot.conversationTitle
+                                    color: Theme.textPrimary
+                                    font { pixelSize: 22; weight: Font.DemiBold }
+                                }
+
+                                Text {
+                                    text: DmManager.messagesLoading && DmManager.messages.count === 0
+                                          ? qsTr("Loading your direct message history with <b>%1</b>...").arg(dmViewRoot.conversationTitle)
+                                          : qsTr("This is the beginning of your direct message history with <b>%1</b>.").arg(dmViewRoot.conversationTitle)
+                                    color: Theme.textMuted
+                                    font.pixelSize: 14
+                                    textFormat: Text.StyledText
+                                }
                             }
-                        }
-
-                        Text {
-                            text:  dmViewRoot.conversationTitle
-                            color: Theme.textPrimary
-                            font { pixelSize: 22; weight: Font.DemiBold }
-                        }
-
-                        Text {
-                                    text: DmManager.openingConversation && !dmViewRoot.conversationId.length
-                                  ? qsTr("Starting a direct message with <b>%1</b>...").arg(dmViewRoot.conversationTitle)
-                                        : (DmManager.messagesLoading && DmManager.messages.count === 0
-                                     ? qsTr("Loading your direct message history with <b>%1</b>...").arg(dmViewRoot.conversationTitle)
-                                     : qsTr("This is the beginning of your direct message history with <b>%1</b>.").arg(dmViewRoot.conversationTitle))
-                            color:      Theme.textMuted
-                            font.pixelSize: 14
-                            textFormat: Text.StyledText
                         }
                     }
 
