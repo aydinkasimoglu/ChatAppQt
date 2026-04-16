@@ -20,10 +20,13 @@ Rectangle {
     ]
     readonly property bool hasConversation: conversationTitle.length > 0 || conversationId.length > 0
     readonly property bool canCompose: conversationId.length > 0
+    readonly property real olderMessagesPrefetchDistance: 400
     property bool autoScrollPending: false
-    property bool prependCompensationPending: false
-    property real prependReferenceContentHeight: 0
-    property real prependReferenceContentY: 0
+    property bool initialBottomScrollPending: false
+    property bool ownSendPending: false
+    property bool prependActive: false
+    property real prependBaseContentY: 0
+    property real prependBaseContentHeight: 0
 
     function _avatarColor(name) {
         if (!name || name.length === 0)
@@ -31,46 +34,105 @@ Rectangle {
         return _palette[name.charCodeAt(0) % _palette.length]
     }
 
-    function _scrollHistoryToBottom() {
-        historyPane.contentY = Math.max(0, historyPane.contentHeight - historyPane.height)
+    function _clearPrependState() {
+        dmViewRoot.prependActive = false
+        dmViewRoot.prependBaseContentY = 0
+        dmViewRoot.prependBaseContentHeight = 0
     }
 
-    function _scrollHistoryToBottomAndAcknowledge() {
-        dmViewRoot._scrollHistoryToBottom()
-        Qt.callLater(dmViewRoot._maybeAcknowledgeVisibleMessages)
+    function _distanceFromTop() {
+        return historyList.contentY + historyList.topMargin
+    }
+
+    function _distanceFromBottom() {
+        return Math.max(0, historyList.contentHeight - historyList.height - historyList.contentY)
+    }
+
+    function _scrollHistoryToBottom() {
+        if (DmManager.messages.count === 0)
+            return
+
+        scrollToBottomAnim.stop()
+        historyList.forceLayout()
+        historyList.positionViewAtIndex(DmManager.messages.count - 1, ListView.End)
+    }
+
+    function _smoothScrollToBottom() {
+        if (DmManager.messages.count === 0)
+            return
+
+        historyList.forceLayout()
+        const dist = dmViewRoot._distanceFromBottom()
+        if (dist < 1) {
+            dmViewRoot.autoScrollPending = false
+            Qt.callLater(dmViewRoot._maybeAcknowledgeVisibleMessages)
+            return
+        }
+
+        if (dist > 600) {
+            historyList.positionViewAtIndex(DmManager.messages.count - 1, ListView.End)
+            dmViewRoot.autoScrollPending = false
+            Qt.callLater(dmViewRoot._maybeAcknowledgeVisibleMessages)
+            return
+        }
+
+        scrollToBottomAnim.stop()
+        scrollToBottomAnim.from = historyList.contentY
+        scrollToBottomAnim.to = historyList.contentY + dist
+        scrollToBottomAnim.duration = Math.min(300, Math.max(120, dist * 0.4))
+        scrollToBottomAnim.start()
+    }
+
+    function _armOpenToLatest() {
+        dmViewRoot.autoScrollPending = true
+        dmViewRoot.initialBottomScrollPending = true
+        Qt.callLater(dmViewRoot._flushPendingAutoScroll)
+    }
+
+    function _flushPendingAutoScroll() {
+        if (!dmViewRoot.autoScrollPending
+                || !dmViewRoot.visible
+                || DmManager.messages.count === 0) {
+            return
+        }
+
+        if (dmViewRoot.initialBottomScrollPending || dmViewRoot.ownSendPending) {
+            dmViewRoot._scrollHistoryToBottom()
+            dmViewRoot.autoScrollPending = false
+            dmViewRoot.initialBottomScrollPending = false
+            dmViewRoot.ownSendPending = false
+            Qt.callLater(dmViewRoot._maybeAcknowledgeVisibleMessages)
+        } else {
+            dmViewRoot.initialBottomScrollPending = false
+            dmViewRoot._smoothScrollToBottom()
+        }
     }
 
     function _requestOlderMessagesIfNeeded() {
         if (!dmViewRoot.visible
                 || dmViewRoot.conversationId.length === 0
+                || DmManager.messages.count === 0
                 || DmManager.messagesLoading
                 || DmManager.loadingOlderMessages
                 || DmManager.historyStartReached
-                || historyPane.contentY > 4) {
+                || dmViewRoot.autoScrollPending
+                || dmViewRoot.initialBottomScrollPending
+                || dmViewRoot.prependActive
+                || dmViewRoot._distanceFromTop() > dmViewRoot.olderMessagesPrefetchDistance) {
             return
         }
 
-        dmViewRoot.prependCompensationPending = true
-        dmViewRoot.prependReferenceContentHeight = historyPane.contentHeight
-        dmViewRoot.prependReferenceContentY = historyPane.contentY
+        dmViewRoot.prependActive = true
+        dmViewRoot.prependBaseContentY = historyList.contentY
+        dmViewRoot.prependBaseContentHeight = historyList.contentHeight
         DmManager.loadOlderMessages()
-    }
-
-    function _restoreViewportAfterPrepend() {
-        if (!dmViewRoot.prependCompensationPending)
-            return
-
-        dmViewRoot.prependCompensationPending = false
-
-        const heightDelta = historyPane.contentHeight - dmViewRoot.prependReferenceContentHeight
-        historyPane.contentY = Math.max(0, dmViewRoot.prependReferenceContentY + heightDelta)
     }
 
     function _maybeAcknowledgeVisibleMessages() {
         if (!dmViewRoot.visible
                 || !DmManager.currentConversationReadActive
                 || dmViewRoot.conversationId.length === 0
-                || !historyPane.atBottom) {
+                || !historyList.atBottom) {
             return
         }
 
@@ -82,21 +144,28 @@ Rectangle {
         if (body.length === 0 || !canCompose)
             return
 
-        dmViewRoot.autoScrollPending = historyPane.atBottom || DmManager.messages.count === 0
+        dmViewRoot.autoScrollPending = true
+        dmViewRoot.ownSendPending = true
         DmManager.sendMessage(body)
         dmViewRoot.messageSent(body)
     }
 
     onConversationIdChanged: {
-        dmViewRoot.autoScrollPending = true
-        dmViewRoot.prependCompensationPending = false
+        scrollToBottomAnim.stop()
+        dmViewRoot.initialBottomScrollPending = true
+        dmViewRoot._clearPrependState()
         messageInput.clear()
         messageInput.focus = false
+        dmViewRoot._armOpenToLatest()
     }
 
     onVisibleChanged: {
         if (!visible)
             messageInput.focus = false
+
+        if (visible && dmViewRoot.hasConversation) {
+            dmViewRoot._armOpenToLatest()
+        }
 
         Qt.callLater(dmViewRoot._maybeAcknowledgeVisibleMessages)
     }
@@ -116,10 +185,10 @@ Rectangle {
         }
 
         function onLoadingOlderMessagesChanged() {
-            if (!DmManager.loadingOlderMessages && dmViewRoot.prependCompensationPending) {
+            if (!DmManager.loadingOlderMessages && dmViewRoot.prependActive) {
                 Qt.callLater(function() {
-                    if (dmViewRoot.prependCompensationPending)
-                        dmViewRoot.prependCompensationPending = false
+                    historyList.forceLayout()
+                    dmViewRoot._clearPrependState()
                 })
             }
         }
@@ -128,14 +197,58 @@ Rectangle {
     Connections {
         target: DmManager.messages
 
-        function onRowsAboutToBeInserted(parent, first, last) {
-            if (dmViewRoot.visible && historyPane.atBottom)
-                dmViewRoot.autoScrollPending = true
+        function onCountChanged() {
+            if (dmViewRoot.autoScrollPending)
+                Qt.callLater(dmViewRoot._flushPendingAutoScroll)
         }
 
-        function onRowsInserted(parent, first, last) {
-            if (first === 0 && dmViewRoot.prependCompensationPending)
-                Qt.callLater(dmViewRoot._restoreViewportAfterPrepend)
+        function onRowsAboutToBeInserted(parent, first, last) {
+            if (first > 0 && dmViewRoot.visible && historyList.atBottom)
+                dmViewRoot.autoScrollPending = true
+        }
+    }
+
+    Component {
+        id: introHeaderComponent
+
+        Item {
+            width: historyList.width
+            implicitHeight: introColumn.implicitHeight
+
+            ColumnLayout {
+                id: introColumn
+
+                x: historyList.sidePadding
+                width: Math.max(0, parent.width - historyList.sidePadding * 2)
+                spacing: 8
+
+                Rectangle {
+                    width: 72; height: 72; radius: 36
+                    color: dmViewRoot._avatarColor(dmViewRoot.conversationTitle)
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: dmViewRoot.conversationTitle.charAt(0).toUpperCase()
+                        color: "#ffffff"
+                        font { pixelSize: 28; weight: Font.DemiBold }
+                    }
+                }
+
+                Text {
+                    text: dmViewRoot.conversationTitle
+                    color: Theme.textPrimary
+                    font { pixelSize: 22; weight: Font.DemiBold }
+                }
+
+                Text {
+                    text: DmManager.messagesLoading && DmManager.messages.count === 0
+                          ? qsTr("Loading your direct message history with <b>%1</b>...").arg(dmViewRoot.conversationTitle)
+                          : qsTr("This is the beginning of your direct message history with <b>%1</b>.").arg(dmViewRoot.conversationTitle)
+                    color: Theme.textMuted
+                    font.pixelSize: 14
+                    textFormat: Text.StyledText
+                }
+            }
         }
     }
 
@@ -253,20 +366,47 @@ Rectangle {
                 font.pixelSize: 14
             }
 
-            Flickable {
-                id: historyPane
+            ListView {
+                id: historyList
 
                 anchors.fill: parent
                 visible: dmViewRoot.hasConversation
-                contentWidth: width
-                contentHeight: Math.max(height, historyStack.implicitHeight + historyPane.bottomPadding)
+                model: DmManager.messages
+                spacing: 4
+                clip: true
                 boundsBehavior: Flickable.StopAtBounds
                 flickableDirection: Flickable.VerticalFlick
-                clip: true
+                reuseItems: true
+                cacheBuffer: 2000
+                pixelAligned: true
+                flickDeceleration: 1500
+                maximumFlickVelocity: 4000
 
-                readonly property real sidePadding:   16
-                readonly property real bottomPadding:  8
-                readonly property bool atBottom: contentY >= Math.max(0, contentHeight - height - 4)
+                readonly property real sidePadding: 16
+                readonly property real bottomPadding: 8
+                readonly property bool atBottom: dmViewRoot._distanceFromBottom() <= 16
+
+                topMargin: Math.max(0, height - contentHeight)
+                footer: Item {
+                    width: historyList.width
+                    height: historyList.bottomPadding
+                }
+                header: DmManager.historyStartReached && dmViewRoot.hasConversation ? introHeaderComponent : null
+
+                NumberAnimation {
+                    id: scrollToBottomAnim
+                    target: historyList
+                    property: "contentY"
+                    easing.type: Easing.OutCubic
+                    onRunningChanged: {
+                        if (!running && dmViewRoot.autoScrollPending) {
+                            dmViewRoot.autoScrollPending = false
+                            Qt.callLater(dmViewRoot._maybeAcknowledgeVisibleMessages)
+                        }
+                    }
+                }
+
+                onMovementStarted: scrollToBottomAnim.stop()
 
                 onAtBottomChanged: {
                     if (atBottom)
@@ -274,100 +414,105 @@ Rectangle {
                 }
 
                 onContentYChanged: {
-                    if (contentY <= 4)
+                    if (!dmViewRoot.prependActive
+                            && !scrollToBottomAnim.running
+                            && dmViewRoot._distanceFromTop() <= dmViewRoot.olderMessagesPrefetchDistance) {
                         Qt.callLater(dmViewRoot._requestOlderMessagesIfNeeded)
-                }
-
-                Column {
-                    id: historyStack
-
-                    x: historyPane.sidePadding
-                    y: historyPane.contentHeight - implicitHeight - historyPane.bottomPadding
-                    width: Math.max(0, historyPane.width - historyPane.sidePadding * 2)
-                    spacing: DmManager.messages.count > 0 ? 16 : 0
-
-                    Text {
-                        width: parent.width
-                        visible: DmManager.loadingOlderMessages
-                        horizontalAlignment: Text.AlignHCenter
-                        text: "Loading older messages..."
-                        color: Theme.textMuted
-                        font.pixelSize: 12
-                    }
-
-                    Loader {
-                        active: DmManager.historyStartReached && dmViewRoot.hasConversation
-                        width: parent.width
-
-                        sourceComponent: Component {
-                            ColumnLayout {
-                                width: historyStack.width
-                                spacing: 8
-
-                                Rectangle {
-                                    width: 72; height: 72; radius: 36
-                                    color: dmViewRoot._avatarColor(dmViewRoot.conversationTitle)
-
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: dmViewRoot.conversationTitle.charAt(0).toUpperCase()
-                                        color: "#ffffff"
-                                        font { pixelSize: 28; weight: Font.DemiBold }
-                                    }
-                                }
-
-                                Text {
-                                    text: dmViewRoot.conversationTitle
-                                    color: Theme.textPrimary
-                                    font { pixelSize: 22; weight: Font.DemiBold }
-                                }
-
-                                Text {
-                                    text: DmManager.messagesLoading && DmManager.messages.count === 0
-                                          ? qsTr("Loading your direct message history with <b>%1</b>...").arg(dmViewRoot.conversationTitle)
-                                          : qsTr("This is the beginning of your direct message history with <b>%1</b>.").arg(dmViewRoot.conversationTitle)
-                                    color: Theme.textMuted
-                                    font.pixelSize: 14
-                                    textFormat: Text.StyledText
-                                }
-                            }
-                        }
-                    }
-
-                    ListView {
-                        id: messageList
-
-                        width: parent.width
-                        height: DmManager.messages.count > 0 ? contentHeight : 0
-                        interactive: false
-                        model:   DmManager.messages
-                        spacing: 4
-                        clip:    true
-                        visible: DmManager.messages.count > 0
-
-                        onCountChanged: {
-                            if (DmManager.messages.count > 0 && dmViewRoot.autoScrollPending) {
-                                dmViewRoot.autoScrollPending = false
-                                Qt.callLater(dmViewRoot._scrollHistoryToBottomAndAcknowledge)
-                            }
-                        }
-
-                        delegate: MessageBubble {
-                            width: ListView.view ? ListView.view.width : 0
-                        }
                     }
                 }
 
-                Text {
-                    anchors.centerIn: parent
-                    visible: DmManager.messagesLoading && DmManager.messages.count === 0 && dmViewRoot.conversationId.length > 0
-                    text: "Loading messages..."
-                    color: Theme.textMuted
-                    font.pixelSize: 13
+                onContentHeightChanged: {
+                    if (dmViewRoot.prependActive) {
+                        if (dmViewRoot.prependBaseContentHeight >= historyList.height) {
+                            const delta = historyList.contentHeight - dmViewRoot.prependBaseContentHeight
+                            historyList.contentY = dmViewRoot.prependBaseContentY + delta
+                            dmViewRoot.prependBaseContentHeight = historyList.contentHeight
+                            dmViewRoot.prependBaseContentY = historyList.contentY
+                        } else if (historyList.contentHeight > historyList.height) {
+                            dmViewRoot.autoScrollPending = true
+                            Qt.callLater(dmViewRoot._flushPendingAutoScroll)
+                        }
+                    } else if (dmViewRoot.autoScrollPending) {
+                        Qt.callLater(dmViewRoot._flushPendingAutoScroll)
+                    }
+                }
+
+                delegate: MessageBubble {
+                    required property string messageId
+
+                    x: historyList.sidePadding
+                    width: historyList.width - historyList.sidePadding * 2
                 }
 
                 ScrollBar.vertical: ScrollBar {
-                    policy: historyPane.contentHeight > historyPane.height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+                    policy: historyList.contentHeight > historyList.height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+                }
+            }
+
+            Rectangle {
+                anchors.horizontalCenter: historyList.horizontalCenter
+                anchors.top: historyList.top
+                anchors.topMargin: 10
+                visible: dmViewRoot.hasConversation && DmManager.loadingOlderMessages && DmManager.messages.count > 0
+                radius: 10
+                color: Qt.rgba(0, 0, 0, 0.18)
+                implicitWidth: loadingOlderLabel.implicitWidth + 20
+                implicitHeight: loadingOlderLabel.implicitHeight + 10
+
+                Text {
+                    id: loadingOlderLabel
+
+                    anchors.centerIn: parent
+                    text: "Loading older messages..."
+                    color: Theme.textMuted
+                    font.pixelSize: 12
+                }
+            }
+
+            Text {
+                anchors.centerIn: parent
+                visible: DmManager.messagesLoading && DmManager.messages.count === 0 && dmViewRoot.conversationId.length > 0
+                text: "Loading messages..."
+                color: Theme.textMuted
+                font.pixelSize: 13
+            }
+
+            Rectangle {
+                id: scrollToBottomBtn
+
+                anchors.horizontalCenter: historyList.horizontalCenter
+                anchors.bottom: historyList.bottom
+                anchors.bottomMargin: 16
+                width: 36; height: 36; radius: 18
+                color: scrollToBottomHover.hovered ? Qt.lighter(Theme.surfaceMid, 1.3) : Theme.surfaceMid
+                border.width: 1
+                border.color: Theme.surfaceBorder
+                visible: dmViewRoot.hasConversation
+                         && !historyList.atBottom
+                         && !dmViewRoot.autoScrollPending
+                         && DmManager.messages.count > 0
+                opacity: visible ? 1.0 : 0.0
+
+                Behavior on opacity { NumberAnimation { duration: 150 } }
+                Behavior on color { ColorAnimation { duration: 100 } }
+
+                HoverHandler { id: scrollToBottomHover; cursorShape: Qt.PointingHandCursor }
+                TapHandler {
+                    onTapped: {
+                        dmViewRoot.autoScrollPending = true
+                        dmViewRoot.ownSendPending = true
+                        Qt.callLater(dmViewRoot._flushPendingAutoScroll)
+                    }
+                }
+
+                Image {
+                    anchors.centerIn: parent
+                    source: "/assets/icons/arrow_upward.svg"
+                    rotation: 180
+                    width: 16; height: 16
+                    sourceSize.width: width * Screen.devicePixelRatio
+                    sourceSize.height: height * Screen.devicePixelRatio
+                    smooth: true; mipmap: true
                 }
             }
         }

@@ -189,19 +189,19 @@ void DmManager::loadOlderMessages()
             return;
         }
 
-        setLoadingOlderMessages(false);
-
         const JsonObjectResponse response = m_networkClient.jsonResponse<QJsonObject>(
             reply,
             QStringLiteral("Couldn't load older direct messages."),
             QStringLiteral("Invalid direct message history response."));
         if (!response.ok) {
+            setLoadingOlderMessages(false);
             emit messagesLoadFailed(response.errorMessage);
             return;
         }
 
         const QJsonValue itemsValue = response.data.value("items");
         if (!itemsValue.isArray()) {
+            setLoadingOlderMessages(false);
             emit messagesLoadFailed(QStringLiteral("Invalid direct message history response."));
             return;
         }
@@ -215,6 +215,8 @@ void DmManager::loadOlderMessages()
 
         if (!items.isEmpty())
             m_messages.prepend(items, currentUserId());
+
+        setLoadingOlderMessages(false);
     });
 }
 
