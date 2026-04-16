@@ -78,6 +78,12 @@ qt_add_qml_module(appChatApp
         components/auth/AuthForm.qml
         components/auth/AuthHeader.qml
         components/auth/AuthTextField.qml
+        components/dm/DmComposer.qml
+        components/dm/DmConversationAvatar.qml
+        components/dm/DmHeaderBar.qml
+        components/dm/DmHistoryIntro.qml
+        components/dm/DmHistoryPane.qml
+        components/dm/DmMessageBubble.qml
         components/dialogs/CreateServerDialog.qml
         views/AuthView.qml
         views/DmView.qml
