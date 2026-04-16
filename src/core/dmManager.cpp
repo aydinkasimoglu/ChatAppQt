@@ -87,6 +87,12 @@ void DmManager::openDirectConversation(const QString &userId, const QString &use
     QNetworkReply *reply = m_networkClient.post("/conversations", payload, true);
     connect(reply, &QNetworkReply::finished, this, [this, reply, userId, username]() {
         reply->deleteLater();
+
+        // Check if the user navigated away while the POST was running
+        if (m_currentDirectPartnerId != userId) {
+            return; 
+        }
+
         setOpeningConversation(false);
 
         const JsonObjectResponse response = m_networkClient.jsonResponse<QJsonObject>(
@@ -185,7 +191,6 @@ void DmManager::loadOlderMessages()
         reply->deleteLater();
 
         if (conversationId != m_currentConversationId) {
-            setLoadingOlderMessages(false);
             return;
         }
 
@@ -261,12 +266,20 @@ void DmManager::sendMessage(const QString &text)
 
 void DmManager::handleIncomingMessage(const QString &conversationId, const QVariantMap &message)
 {
-    fetchConversations();
+    const bool isActive = (conversationId == m_currentConversationId);
 
-    if (conversationId != m_currentConversationId)
-        return;
+    // Update conversation list locally (Title, unread counts, moves to top)
+    m_conversations.updateConversationFromMessage(conversationId, message, currentUserId(), isActive);
 
-    m_messages.append(message, currentUserId());
+    // If it is NOT in our list (like a brand new DM), fetch from the server
+    if (!m_conversations.containsConversation(conversationId)) {
+        fetchConversations();
+    }
+
+    // Append to message window if we are looking at this chat
+    if (isActive) {
+        m_messages.append(message, currentUserId());
+    }
 }
 
 void DmManager::resetState()
@@ -300,7 +313,6 @@ void DmManager::loadMessages(const QString &conversationId)
         reply->deleteLater();
 
         if (conversationId != m_currentConversationId) {
-            setMessagesLoading(false);
             return;
         }
 

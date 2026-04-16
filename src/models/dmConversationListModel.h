@@ -40,6 +40,10 @@ public:
     QVariantMap conversationById(const QString &conversationId) const;
     QString conversationIdForDirectPartner(const QString &directPartnerId) const;
 
+    void updateConversationFromMessage(const QString &conversationId, 
+                                       const QVariantMap &message, 
+                                       const QString &currentUserId, 
+                                       bool isCurrentOpenConversation);
 signals:
     void countChanged();
 

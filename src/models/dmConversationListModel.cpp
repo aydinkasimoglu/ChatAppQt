@@ -158,3 +158,53 @@ QVariantMap DmConversationListModel::toVariantMap(const ConversationItem &conver
         { QStringLiteral("lastActivityAt"), conversation.lastActivityAt },
     };
 }
+
+void DmConversationListModel::updateConversationFromMessage(const QString &conversationId, 
+                                                            const QVariantMap &message, 
+                                                            const QString &currentUserId, 
+                                                            bool isCurrentOpenConversation)
+{
+    int foundIndex = -1;
+    for (int i = 0; i < m_conversations.size(); ++i) {
+        if (m_conversations[i].conversationId == conversationId) {
+            foundIndex = i;
+            break;
+        }
+    }
+
+    ConversationItem item;
+
+    if (foundIndex != -1) {
+        // Remove it from its current position to move it to the top
+        beginRemoveRows({}, foundIndex, foundIndex);
+        item = m_conversations.takeAt(foundIndex);
+        endRemoveRows();
+    } else {
+        // If the conversation is brand new (not in the list), 
+        // fall back to fetching from the server.
+        return; 
+    }
+
+    // 1. Update the snippet
+    const QString senderId = message.value(QStringLiteral("sender_id")).toString();
+    const QString content = message.value(QStringLiteral("content")).toString();
+    const QString basePreview = content.isEmpty() ? tr("Message deleted") : content;
+
+    if (!currentUserId.isEmpty() && senderId == currentUserId)
+        item.lastMessagePreview = tr("You: %1").arg(basePreview);
+    else
+        item.lastMessagePreview = basePreview;
+
+    // 2. Update metadata
+    item.lastActivityAt = message.value(QStringLiteral("created_at")).toString();
+
+    // 3. Increment unread count if it's from someone else and we aren't looking at it
+    if (!isCurrentOpenConversation && senderId != currentUserId) {
+        item.unreadCount++;
+    }
+
+    // 4. Insert at the top of the list
+    beginInsertRows({}, 0, 0);
+    m_conversations.prepend(item);
+    endInsertRows();
+}

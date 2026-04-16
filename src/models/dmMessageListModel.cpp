@@ -93,15 +93,24 @@ void DmMessageListModel::prepend(const QJsonArray &messages, const QString &curr
         if (!value.isObject())
             continue;
 
-        pageItems.append(messageFromJson(value.toObject(), currentUserId));
+        QJsonObject obj = value.toObject();
+        if (!containsMessage(obj.value("message_id").toString())) {
+            pageItems.append(messageFromJson(obj, currentUserId));
+        }
     }
 
     if (pageItems.isEmpty())
         return;
 
     beginInsertRows({}, 0, pageItems.size() - 1);
-    for (int index = pageItems.size() - 1; index >= 0; --index)
-        m_messages.prepend(pageItems.at(index));
+    // Efficiently prepend by creating a new list, reserving exact capacity, 
+    // and appending the blocks.
+    QList<MessageItem> combined;
+    combined.reserve(pageItems.size() + m_messages.size());
+    combined.append(pageItems);
+    combined.append(m_messages);
+    m_messages = std::move(combined);
+
     endInsertRows();
 }
 
@@ -172,5 +181,5 @@ QString DmMessageListModel::formatTimeLabel(const QString &createdAt)
     if (!timestamp.isValid())
         return {};
 
-    return timestamp.toLocalTime().toString(QStringLiteral("hh:mm"));
+    return QLocale().toString(timestamp.toLocalTime().time(), QLocale::ShortFormat);
 }
