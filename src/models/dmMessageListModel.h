@@ -4,6 +4,7 @@
 #include <QAbstractListModel>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QSet>
 #include <QVariantMap>
 #include <qqmlintegration.h>
 
@@ -41,7 +42,7 @@ public:
 
     QString latestMessageId() const;
     QString oldestMessageId() const;
-    bool containsMessage(const QString &messageId) const;
+    bool containsMessage(const QString &messageId) const noexcept;
 
 signals:
     void countChanged();
@@ -59,10 +60,11 @@ private:
         bool isDeleted = false;
     };
 
+    bool shouldInsertMessage(const QString &messageId) const noexcept;
     static MessageItem messageFromJson(const QJsonObject &object, const QString &currentUserId);
-    static QString formatTimeLabel(const QString &createdAt);
 
     QList<MessageItem> m_messages;
+    QSet<QString> m_messageIds;
 };
 
 #endif // DMMESSAGELISTMODEL_H

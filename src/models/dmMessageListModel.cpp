@@ -2,6 +2,29 @@
 
 #include <QDateTime>
 #include <QJsonObject>
+#include <QLocale>
+#include <qabstractitemmodel.h>
+#include <qlatin1stringview.h>
+
+namespace
+{
+    QString messageIdFromJson(const QJsonObject &object)
+    {
+        return object.value(QLatin1String("message_id")).toString();
+    }
+
+    QString formatTimeLabel(const QString &createdAt)
+    {
+        QDateTime timestamp = QDateTime::fromString(createdAt, Qt::ISODateWithMs);
+        if (!timestamp.isValid())
+            timestamp = QDateTime::fromString(createdAt, Qt::ISODate);
+
+        if (!timestamp.isValid())
+            return {};
+
+        return QLocale().toString(timestamp.toLocalTime().time(), QLocale::ShortFormat);
+    }
+}
 
 DmMessageListModel::DmMessageListModel(QObject *parent)
     : QAbstractListModel(parent)
@@ -68,13 +91,25 @@ void DmMessageListModel::reset(const QJsonArray &messages, const QString &curren
 {
     beginResetModel();
     m_messages.clear();
+    m_messageIds.clear();
 
-    for (int index = messages.size() - 1; index >= 0; --index) {
+    const qsizetype messageCount = messages.size();
+
+    m_messages.reserve(messageCount); 
+    m_messageIds.reserve(messageCount);
+
+    for (int index = messageCount - 1; index >= 0; --index) {
         const QJsonValue value = messages.at(index);
         if (!value.isObject())
             continue;
 
-        m_messages.append(messageFromJson(value.toObject(), currentUserId));
+        const QJsonObject object = value.toObject();
+        const QString messageId = messageIdFromJson(object);
+        if (!shouldInsertMessage(messageId))
+            continue;
+
+        m_messages.append(messageFromJson(object, currentUserId));
+        m_messageIds.insert(messageId);
     }
 
     endResetModel();
@@ -88,36 +123,47 @@ void DmMessageListModel::appendOlderPage(const QJsonArray &messages, const QStri
     QList<MessageItem> pageItems;
     pageItems.reserve(messages.size());
 
+    constexpr QLatin1String messageIdKey("message_id");
+
     for (int index = messages.size() - 1; index >= 0; --index) {
         const QJsonValue value = messages.at(index);
         if (!value.isObject())
             continue;
 
-        QJsonObject obj = value.toObject();
-        if (!containsMessage(obj.value("message_id").toString())) {
-            pageItems.append(messageFromJson(obj, currentUserId));
-        }
+        const QJsonObject obj = value.toObject();
+        const QString messageId = messageIdFromJson(obj);
+        if (!shouldInsertMessage(messageId))
+            continue;
+
+        pageItems.append(messageFromJson(obj, currentUserId));
+        m_messageIds.insert(messageId);
     }
 
     if (pageItems.isEmpty())
         return;
 
-    const int insertRow = m_messages.count();
-    beginInsertRows({}, insertRow, insertRow + pageItems.size() - 1);
-    for (const MessageItem &message : pageItems)
-        m_messages.append(message);
+    const qsizetype rowCount = m_messages.size();
+    const qsizetype itemCount = pageItems.size();
+    beginInsertRows(QModelIndex(), rowCount, rowCount + itemCount - 1);
+    
+    m_messages.reserve(rowCount + itemCount);
+
+    for (auto &message : pageItems) {
+        m_messages.append(std::move(message));
+    }
 
     endInsertRows();
 }
 
 void DmMessageListModel::prependMessage(const QJsonObject &message, const QString &currentUserId)
 {
-    const QString messageId = message.value("message_id").toString();
-    if (messageId.isEmpty() || containsMessage(messageId))
+    const QString messageId = messageIdFromJson(message);
+    if (!shouldInsertMessage(messageId))
         return;
 
-    beginInsertRows({}, 0, 0);
+    beginInsertRows(QModelIndex(), 0, 0);
     m_messages.prepend(messageFromJson(message, currentUserId));
+    m_messageIds.insert(messageId);
     endInsertRows();
 }
 
@@ -130,6 +176,7 @@ void DmMessageListModel::clear()
 {
     beginResetModel();
     m_messages.clear();
+    m_messageIds.clear();
     endResetModel();
 }
 
@@ -143,43 +190,34 @@ QString DmMessageListModel::oldestMessageId() const
     return m_messages.isEmpty() ? QString() : m_messages.constLast().messageId;
 }
 
-bool DmMessageListModel::containsMessage(const QString &messageId) const
+bool DmMessageListModel::containsMessage(const QString &messageId) const noexcept
 {
-    for (const MessageItem &message : m_messages) {
-        if (message.messageId == messageId)
-            return true;
-    }
+    return m_messageIds.contains(messageId);
+}
 
-    return false;
+bool DmMessageListModel::shouldInsertMessage(const QString &messageId) const noexcept
+{
+    return !messageId.isEmpty() && !containsMessage(messageId);
 }
 
 DmMessageListModel::MessageItem DmMessageListModel::messageFromJson(const QJsonObject &object,
                                                                     const QString &currentUserId)
 {
     MessageItem message;
-    message.messageId = object.value("message_id").toString();
-    message.conversationId = object.value("conversation_id").toString();
-    message.senderId = object.value("sender_id").toString();
-    message.senderUsername = object.value("sender_username").toString();
-    message.createdAt = object.value("created_at").toString();
+    message.messageId      = object.value(QLatin1String("message_id")).toString();
+    message.conversationId = object.value(QLatin1String("conversation_id")).toString();
+    message.senderId       = object.value(QLatin1String("sender_id")).toString();
+    message.senderUsername = object.value(QLatin1String("sender_username")).toString();
+    message.createdAt      = object.value(QLatin1String("created_at")).toString();
     message.timeLabel = formatTimeLabel(message.createdAt);
     message.isSelf = !currentUserId.isEmpty() && message.senderId == currentUserId;
-    message.isDeleted = !object.value("deleted_at").isNull() && !object.value("deleted_at").toString().isEmpty();
+    constexpr QLatin1String deletedAtKey = QLatin1String("deleted_at");
+    message.isDeleted = !object.value(deletedAtKey).isNull() && !object.value(deletedAtKey).toString().isEmpty();
 
-    const QString content = object.value("content").toString();
-    message.body = content.isEmpty() ? QStringLiteral("Message deleted") : content;
+    const QString content = object.value(QLatin1String("content")).toString();
+    message.body = message.isDeleted || content.isEmpty()
+        ? QStringLiteral("Message deleted")
+        : content;
 
     return message;
-}
-
-QString DmMessageListModel::formatTimeLabel(const QString &createdAt)
-{
-    QDateTime timestamp = QDateTime::fromString(createdAt, Qt::ISODateWithMs);
-    if (!timestamp.isValid())
-        timestamp = QDateTime::fromString(createdAt, Qt::ISODate);
-
-    if (!timestamp.isValid())
-        return {};
-
-    return QLocale().toString(timestamp.toLocalTime().time(), QLocale::ShortFormat);
 }
