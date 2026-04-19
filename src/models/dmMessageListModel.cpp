@@ -80,7 +80,7 @@ void DmMessageListModel::reset(const QJsonArray &messages, const QString &curren
     endResetModel();
 }
 
-void DmMessageListModel::prepend(const QJsonArray &messages, const QString &currentUserId)
+void DmMessageListModel::appendOlderPage(const QJsonArray &messages, const QString &currentUserId)
 {
     if (messages.isEmpty())
         return;
@@ -102,33 +102,28 @@ void DmMessageListModel::prepend(const QJsonArray &messages, const QString &curr
     if (pageItems.isEmpty())
         return;
 
-    beginInsertRows({}, 0, pageItems.size() - 1);
-    // Efficiently prepend by creating a new list, reserving exact capacity, 
-    // and appending the blocks.
-    QList<MessageItem> combined;
-    combined.reserve(pageItems.size() + m_messages.size());
-    combined.append(pageItems);
-    combined.append(m_messages);
-    m_messages = std::move(combined);
+    const int insertRow = m_messages.count();
+    beginInsertRows({}, insertRow, insertRow + pageItems.size() - 1);
+    for (const MessageItem &message : pageItems)
+        m_messages.append(message);
 
     endInsertRows();
 }
 
-void DmMessageListModel::append(const QJsonObject &message, const QString &currentUserId)
+void DmMessageListModel::prependMessage(const QJsonObject &message, const QString &currentUserId)
 {
     const QString messageId = message.value("message_id").toString();
     if (messageId.isEmpty() || containsMessage(messageId))
         return;
 
-    const int insertRow = m_messages.count();
-    beginInsertRows({}, insertRow, insertRow);
-    m_messages.append(messageFromJson(message, currentUserId));
+    beginInsertRows({}, 0, 0);
+    m_messages.prepend(messageFromJson(message, currentUserId));
     endInsertRows();
 }
 
-void DmMessageListModel::append(const QVariantMap &message, const QString &currentUserId)
+void DmMessageListModel::prependMessage(const QVariantMap &message, const QString &currentUserId)
 {
-    append(QJsonObject::fromVariantMap(message), currentUserId);
+    prependMessage(QJsonObject::fromVariantMap(message), currentUserId);
 }
 
 void DmMessageListModel::clear()
@@ -139,6 +134,11 @@ void DmMessageListModel::clear()
 }
 
 QString DmMessageListModel::latestMessageId() const
+{
+    return m_messages.isEmpty() ? QString() : m_messages.constFirst().messageId;
+}
+
+QString DmMessageListModel::oldestMessageId() const
 {
     return m_messages.isEmpty() ? QString() : m_messages.constLast().messageId;
 }

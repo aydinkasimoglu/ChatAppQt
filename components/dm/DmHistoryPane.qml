@@ -13,24 +13,15 @@ Item {
     required property bool hasConversation
     required property bool viewVisible
 
-    readonly property real olderMessagesPrefetchDistance: 400
+    readonly property real olderMessagesPrefetchDistance: 800
     property bool autoScrollPending: false
     property bool initialBottomScrollPending: false
     property bool ownSendPending: false
-    property bool prependActive: false
-    property real prependBaseContentY: 0
-    property real prependBaseContentHeight: 0
 
     clip: true
 
-    function _clearPrependState() {
-        historyPane.prependActive = false
-        historyPane.prependBaseContentY = 0
-        historyPane.prependBaseContentHeight = 0
-    }
-
     function _distanceFromTop() {
-        return historyList.contentY + historyList.topMargin
+        return Math.max(0, historyList.contentY - historyList.originY)
     }
 
     function _distanceFromBottom() {
@@ -43,7 +34,7 @@ Item {
 
         scrollToBottomAnim.stop()
         historyList.forceLayout()
-        historyList.contentY = historyList.contentHeight - historyList.height
+        historyList.positionViewAtBeginning()
     }
 
     function _smoothScrollToBottom() {
@@ -59,7 +50,7 @@ Item {
         }
 
         if (dist > 600) {
-            historyList.positionViewAtIndex(DmManager.messages.count - 1, ListView.End)
+            historyPane._scrollHistoryToBottom()
             historyPane.autoScrollPending = false
             Qt.callLater(historyPane._maybeAcknowledgeVisibleMessages)
             return
@@ -86,7 +77,6 @@ Item {
     function resetForConversationChange() {
         scrollToBottomAnim.stop()
         historyPane.initialBottomScrollPending = true
-        historyPane._clearPrependState()
     }
 
     function scheduleAcknowledgeVisibleMessages() {
@@ -106,6 +96,7 @@ Item {
             historyPane.initialBottomScrollPending = false
             historyPane.ownSendPending = false
             Qt.callLater(historyPane._maybeAcknowledgeVisibleMessages)
+            Qt.callLater(historyPane._requestOlderMessagesIfNeeded)
         } else {
             historyPane.initialBottomScrollPending = false
             historyPane._smoothScrollToBottom()
@@ -121,14 +112,10 @@ Item {
                 || DmManager.historyStartReached
                 || historyPane.autoScrollPending
                 || historyPane.initialBottomScrollPending
-                || historyPane.prependActive
                 || historyPane._distanceFromTop() > historyPane.olderMessagesPrefetchDistance) {
             return
         }
 
-        historyPane.prependActive = true
-        historyPane.prependBaseContentY = historyList.contentY
-        historyPane.prependBaseContentHeight = historyList.contentHeight
         DmManager.loadOlderMessages()
     }
 
@@ -151,12 +138,8 @@ Item {
         }
 
         function onLoadingOlderMessagesChanged() {
-            if (!DmManager.loadingOlderMessages && historyPane.prependActive) {
-                Qt.callLater(function() {
-                    historyList.forceLayout()
-                    historyPane._clearPrependState()
-                })
-            }
+            if (!DmManager.loadingOlderMessages)
+                Qt.callLater(historyPane._requestOlderMessagesIfNeeded)
         }
     }
 
@@ -169,13 +152,13 @@ Item {
         }
 
         function onRowsAboutToBeInserted(parent, first, last) {
-            if (first > 0 && historyPane.viewVisible && historyList.atBottom)
+            if (first === 0 && historyPane.viewVisible && historyList.atBottom)
                 historyPane.autoScrollPending = true
         }
     }
 
     Component {
-        id: introHeaderComponent
+        id: introFooterComponent
 
         DmHistoryIntro {
             width: historyList.width
@@ -203,8 +186,11 @@ Item {
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         flickableDirection: Flickable.VerticalFlick
+        verticalLayoutDirection: ListView.BottomToTop
         reuseItems: true
-        cacheBuffer: 2000
+        cacheBuffer: 1500
+        displayMarginBeginning: 400
+        displayMarginEnd: 400
         pixelAligned: true
         flickDeceleration: 1500
         maximumFlickVelocity: 4000
@@ -213,14 +199,45 @@ Item {
         readonly property real bottomPadding: 8
         readonly property bool atBottom: historyPane._distanceFromBottom() <= 16
 
-        topMargin: Math.max(0, height - contentHeight)
-
-        footer: Item {
+        header: Item {
             width: historyList.width
             height: historyList.bottomPadding
         }
 
-        header: DmManager.historyStartReached && historyPane.hasConversation ? introHeaderComponent : null
+        footer: historyPane.hasConversation ? historyFooterComponent : null
+
+        Component {
+            id: historyFooterComponent
+
+            Item {
+                width: historyList.width
+                implicitHeight: footerColumn.implicitHeight
+
+                Column {
+                    id: footerColumn
+
+                    width: parent.width
+                    spacing: 10
+
+                    Item {
+                        width: parent.width
+                        height: DmManager.loadingOlderMessages && DmManager.messages.count > 0 ? 60 : 0
+
+                        BusyIndicator {
+                            anchors.centerIn: parent
+                            visible: parent.height > 0
+                            running: visible
+                        }
+                    }
+
+                    Loader {
+                        width: parent.width
+                        active: DmManager.historyStartReached
+                        sourceComponent: introFooterComponent
+                    }
+                }
+            }
+        }
 
         NumberAnimation {
             id: scrollToBottomAnim
@@ -233,6 +250,7 @@ Item {
                 if (!running && historyPane.autoScrollPending) {
                     historyPane.autoScrollPending = false
                     Qt.callLater(historyPane._maybeAcknowledgeVisibleMessages)
+                    Qt.callLater(historyPane._requestOlderMessagesIfNeeded)
                 }
             }
         }
@@ -245,26 +263,18 @@ Item {
         }
 
         onContentYChanged: {
-            if (!historyPane.prependActive
-                    && !scrollToBottomAnim.running
+            if (!scrollToBottomAnim.running
                     && historyPane._distanceFromTop() <= historyPane.olderMessagesPrefetchDistance) {
                 Qt.callLater(historyPane._requestOlderMessagesIfNeeded)
             }
         }
 
         onContentHeightChanged: {
-            if (historyPane.prependActive) {
-                if (historyPane.prependBaseContentHeight >= historyList.height) {
-                    const delta = historyList.contentHeight - historyPane.prependBaseContentHeight
-                    historyList.contentY = historyPane.prependBaseContentY + delta
-                    historyPane.prependBaseContentHeight = historyList.contentHeight
-                    historyPane.prependBaseContentY = historyList.contentY
-                } else if (historyList.contentHeight > historyList.height) {
-                    historyPane.autoScrollPending = true
-                    Qt.callLater(historyPane._flushPendingAutoScroll)
-                }
-            } else if (historyPane.autoScrollPending) {
+            if (historyPane.autoScrollPending) {
                 Qt.callLater(historyPane._flushPendingAutoScroll)
+            } else if (!scrollToBottomAnim.running
+                    && historyPane._distanceFromTop() <= historyPane.olderMessagesPrefetchDistance) {
+                Qt.callLater(historyPane._requestOlderMessagesIfNeeded)
             }
         }
 
@@ -280,84 +290,11 @@ Item {
         }
     }
 
-    Rectangle {
-        anchors.horizontalCenter: historyList.horizontalCenter
-        anchors.top: historyList.top
-        anchors.topMargin: 10
-        visible: historyPane.hasConversation && DmManager.loadingOlderMessages && DmManager.messages.count > 0
-        radius: 10
-        color: Qt.rgba(0, 0, 0, 0.18)
-        implicitWidth: loadingOlderLabel.implicitWidth + 20
-        implicitHeight: loadingOlderLabel.implicitHeight + 10
-
-        Text {
-            id: loadingOlderLabel
-
-            anchors.centerIn: parent
-            text: "Loading older messages..."
-            color: Theme.textMuted
-            font.pixelSize: 12
-        }
-    }
-
     Text {
         anchors.centerIn: parent
         visible: DmManager.messagesLoading && DmManager.messages.count === 0 && historyPane.conversationId.length > 0
         text: "Loading messages..."
         color: Theme.textMuted
         font.pixelSize: 13
-    }
-
-    Rectangle {
-        id: scrollToBottomButton
-
-        anchors.horizontalCenter: historyList.horizontalCenter
-        anchors.bottom: historyList.bottom
-        anchors.bottomMargin: 16
-        width: 36
-        height: 36
-        radius: 18
-        color: scrollToBottomHover.hovered ? Qt.lighter(Theme.surfaceMid, 1.3) : Theme.surfaceMid
-        border.width: 1
-        border.color: Theme.surfaceBorder
-        visible: historyPane.hasConversation
-                 && DmManager.messages.count > 0
-                 && !historyPane.autoScrollPending
-                 && historyList.contentHeight > historyList.height
-                 && historyPane._distanceFromBottom() > 150
-        opacity: visible ? 1.0 : 0.0
-
-        Behavior on opacity {
-            NumberAnimation { duration: 150 }
-        }
-
-        Behavior on color {
-            ColorAnimation { duration: 100 }
-        }
-
-        HoverHandler {
-            id: scrollToBottomHover
-            cursorShape: Qt.PointingHandCursor
-        }
-
-        TapHandler {
-            onTapped: {
-                historyPane.autoScrollPending = true
-                historyPane.ownSendPending = true
-                Qt.callLater(historyPane._flushPendingAutoScroll)
-            }
-        }
-
-        Image {
-            anchors.centerIn: parent
-            source: "/assets/icons/arrow_upward.svg"
-            rotation: 180
-            width: 16
-            height: 16
-            sourceSize.width: width * Screen.devicePixelRatio
-            sourceSize.height: height * Screen.devicePixelRatio
-            smooth: true
-            mipmap: true
-        }
     }
 }

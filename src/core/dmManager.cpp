@@ -171,13 +171,13 @@ void DmManager::loadOlderMessages()
         return;
     }
 
-    if (m_nextBeforeMessageId.isEmpty()) {
+    const QString beforeMessageId = m_messages.oldestMessageId();
+    if (beforeMessageId.isEmpty()) {
         setHistoryStartReached(true);
         return;
     }
 
     const QString conversationId = m_currentConversationId;
-    const QString beforeMessageId = m_nextBeforeMessageId;
 
     setLoadingOlderMessages(true);
 
@@ -212,14 +212,11 @@ void DmManager::loadOlderMessages()
         }
 
         const QJsonArray items = itemsValue.toArray();
-        const bool reachedStart = items.size() < MessagePageSize;
-        setHistoryStartReached(reachedStart);
-        m_nextBeforeMessageId = reachedStart
-            ? QString()
-            : response.data.value("next_before_message_id").toString();
+        const bool hasOlder = response.data.value("has_older").toBool();
+        setHistoryStartReached(!hasOlder);
 
         if (!items.isEmpty())
-            m_messages.prepend(items, currentUserId());
+            m_messages.appendOlderPage(items, currentUserId());
 
         setLoadingOlderMessages(false);
     });
@@ -257,7 +254,7 @@ void DmManager::sendMessage(const QString &text)
         }
 
         if (conversationId == m_currentConversationId)
-            m_messages.append(response.data, currentUserId());
+            m_messages.prependMessage(response.data, currentUserId());
 
         fetchConversations();
         emit messageSent();
@@ -276,9 +273,9 @@ void DmManager::handleIncomingMessage(const QString &conversationId, const QVari
         fetchConversations();
     }
 
-    // Append to message window if we are looking at this chat
+    // Show the new message immediately if we are looking at this chat
     if (isActive) {
-        m_messages.append(message, currentUserId());
+        m_messages.prependMessage(message, currentUserId());
     }
 }
 
@@ -334,11 +331,8 @@ void DmManager::loadMessages(const QString &conversationId)
         }
 
         const QJsonArray items = itemsValue.toArray();
-        const bool reachedStart = items.size() < MessagePageSize;
-        setHistoryStartReached(reachedStart);
-        m_nextBeforeMessageId = reachedStart
-            ? QString()
-            : response.data.value("next_before_message_id").toString();
+        const bool hasOlder = response.data.value("has_older").toBool();
+        setHistoryStartReached(!hasOlder);
         m_messages.reset(items, currentUserId());
     });
 }
@@ -444,7 +438,6 @@ void DmManager::syncCurrentConversationFromModel()
 
 void DmManager::resetMessagePaginationState()
 {
-    m_nextBeforeMessageId.clear();
     setLoadingOlderMessages(false);
     setHistoryStartReached(false);
 }

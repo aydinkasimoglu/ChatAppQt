@@ -34,12 +34,13 @@ public:
     QHash<int, QByteArray> roleNames() const override;
 
     void reset(const QJsonArray &messages, const QString &currentUserId);
-    void prepend(const QJsonArray &messages, const QString &currentUserId);
-    void append(const QJsonObject &message, const QString &currentUserId);
-    void append(const QVariantMap &message, const QString &currentUserId);
+    void appendOlderPage(const QJsonArray &messages, const QString &currentUserId);
+    void prependMessage(const QJsonObject &message, const QString &currentUserId);
+    void prependMessage(const QVariantMap &message, const QString &currentUserId);
     void clear();
 
     QString latestMessageId() const;
+    QString oldestMessageId() const;
     bool containsMessage(const QString &messageId) const;
 
 signals:

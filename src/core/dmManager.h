@@ -100,7 +100,6 @@ private:
     QString m_currentConversationId;
     QString m_currentConversationTitle;
     QString m_currentDirectPartnerId;
-    QString m_nextBeforeMessageId;
     bool m_currentConversationReadActive = false;
     bool m_conversationsLoading = false;
     bool m_messagesLoading = false;
