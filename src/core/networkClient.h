@@ -92,9 +92,16 @@ public:
     }
 
 private:
+    QNetworkReply *send(const QString &method,
+                        const QString &path,
+                        const QByteArray &body = QByteArray(),
+                        bool withAuth = false,
+                        int authRetryCount = 0) const;
     static QString defaultInvalidJsonMessage(const QString &invalidMessage);
     QString errorMessage(const QByteArray &body, QNetworkReply *reply,
                          const QString &fallbackMessage) const;
+    NetworkResponse buildResponse(QNetworkReply *reply,
+                                  const QString &fallbackMessage) const;
     QNetworkRequest makeRequest(const QString &path, bool withAuth) const;
 
     QNetworkAccessManager *m_networkManager;

@@ -31,10 +31,13 @@ public:
     void setUsername(const QString& username) { m_username = username; }
 
     static AuthClient *create(QQmlEngine *, QJSEngine *) { return new AuthClient(); }
+    static AuthClient *instance() { return s_instance; }
 
     Q_INVOKABLE void login(const QString& email, const QString& password);
     Q_INVOKABLE void signup(const QString& email, const QString& username, const QString& password);
     Q_INVOKABLE void logout();
+
+    bool refreshAccessTokenBlocking();
 
     bool isAuthenticated() const { return !m_accessToken.isEmpty(); }
     bool isUserLoaded() const { return m_userLoaded; }
@@ -51,6 +54,7 @@ signals:
     void userLoaded();
     void userLoadFailed(QString message);
     void restoringSessionChanged();
+    void accessTokenRefreshFinished(bool success, bool authenticationRejected);
 
 private:
     void storeTokens(const QString& accessToken, const QString& refreshToken);
@@ -58,6 +62,9 @@ private:
     void fetchUserInfo(const QString& userId);
     void refreshAccessToken();
     void scheduleTokenRefresh(const QString& accessToken);
+    void startTokenRefresh(bool allowTransientRetries);
+    void finalizeTokenRefresh(QNetworkReply *reply, bool allowTransientRetries);
+    void scheduleDeferredRefreshRetry();
 
     NetworkClient m_networkClient;
     QTimer m_refreshTimer;
@@ -71,6 +78,8 @@ private:
     int m_refreshRetryCount = 0;
 
     QString m_email, m_username;
+
+    static inline AuthClient *s_instance = nullptr;
 };
 
 #endif // AUTHCLIENT_H

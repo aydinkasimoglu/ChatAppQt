@@ -1,6 +1,7 @@
 #include "authclient.h"
 
 #include <QDateTime>
+#include <QEventLoop>
 #include <QJsonDocument>
 #include <QNetworkReply>
 #include <QSettings>
@@ -16,6 +17,12 @@ static constexpr int MAX_REFRESH_RETRIES = 3;
 
 // Initial backoff delay between refresh retries (doubles each attempt).
 static constexpr int INITIAL_RETRY_DELAY_MS = 2000;
+
+// Retry in the background after transient failures without discarding the session.
+static constexpr int DEFERRED_REFRESH_RETRY_MS = 15000;
+
+// Cap how long a blocking refresh wait can hold a request recovery path.
+static constexpr int BLOCKING_REFRESH_TIMEOUT_MS = 35000;
 
 // ---------------------------------------------------------------------------
 // JWT helpers (stateless, file-local)
@@ -50,6 +57,8 @@ static qint64 decodeTokenExpiry(const QString& token)
 
 AuthClient::AuthClient(QObject *parent) : QObject(parent)
 {
+    s_instance = this;
+
     m_refreshTimer.setSingleShot(true);
     connect(&m_refreshTimer, &QTimer::timeout, this, &AuthClient::refreshAccessToken);
 
@@ -60,6 +69,49 @@ AuthClient::AuthClient(QObject *parent) : QObject(parent)
         m_restoringSession = true;
         refreshAccessToken();
     }
+}
+
+bool AuthClient::refreshAccessTokenBlocking()
+{
+    if (m_refreshToken.isEmpty())
+        return false;
+
+    bool finished = false;
+    bool succeeded = false;
+
+    QEventLoop loop;
+    QTimer timeoutTimer;
+    timeoutTimer.setSingleShot(true);
+
+    const QMetaObject::Connection finishedConnection = connect(
+        this,
+        &AuthClient::accessTokenRefreshFinished,
+        &loop,
+        [&](bool success, bool) {
+            finished = true;
+            succeeded = success;
+            loop.quit();
+        });
+
+    const QMetaObject::Connection timeoutConnection = connect(
+        &timeoutTimer,
+        &QTimer::timeout,
+        &loop,
+        [&]() {
+            loop.quit();
+        });
+
+    if (!m_refreshInProgress)
+        startTokenRefresh(false);
+
+    timeoutTimer.start(BLOCKING_REFRESH_TIMEOUT_MS);
+    if (!finished)
+        loop.exec();
+
+    disconnect(finishedConnection);
+    disconnect(timeoutConnection);
+
+    return finished && succeeded;
 }
 
 void AuthClient::login(const QString& email, const QString& password)
@@ -169,81 +221,7 @@ void AuthClient::fetchUserInfo(const QString& userId)
 
 void AuthClient::refreshAccessToken()
 {
-    if (m_refreshToken.isEmpty() || m_refreshInProgress)
-        return;
-
-    m_refreshInProgress = true;
-
-    QJsonObject json;
-    json["refresh_token"] = m_refreshToken;
-
-    QNetworkReply *reply = m_networkClient.post("/auth/refresh", json);
-
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        reply->deleteLater();
-        m_refreshInProgress = false;
-
-        const JsonObjectResponse response = m_networkClient.jsonResponse<QJsonObject>(reply);
-        if (!response.ok) {
-            const bool wasRestoring = m_restoringSession;
-            m_restoringSession = false;
-
-            // Definitive auth rejection — token revoked or expired on server.
-            if (response.statusCode == 401 || response.statusCode == 403) {
-                m_refreshRetryCount = 0;
-                clearTokens();
-                if (wasRestoring) emit restoringSessionChanged();
-                emit authenticationChanged();
-                return;
-            }
-
-            // Transient failure (network error, 5xx) — retry with exponential backoff.
-            if (m_refreshRetryCount < MAX_REFRESH_RETRIES) {
-                const int delay = INITIAL_RETRY_DELAY_MS * (1 << m_refreshRetryCount);
-                ++m_refreshRetryCount;
-                QTimer::singleShot(delay, this, &AuthClient::refreshAccessToken);
-                return;
-            }
-
-            // Retries exhausted.
-            m_refreshRetryCount = 0;
-            clearTokens();
-            if (wasRestoring) emit restoringSessionChanged();
-            emit authenticationChanged();
-            return;
-        }
-
-        m_refreshRetryCount = 0;
-
-        const QString accessToken  = response.data.value("access_token").toString();
-        const QString refreshToken = response.data.value("refresh_token").toString();
-        if (accessToken.isEmpty() || refreshToken.isEmpty()) {
-            clearTokens();
-            emit authenticationChanged();
-            return;
-        }
-
-        const bool firstLoad = !m_userLoaded;
-        storeTokens(accessToken, refreshToken);
-
-        // Tokens are stored — clear restoring flag and notify QML atomically
-        // so it never sees both isRestoringSession=false AND isAuthenticated=false.
-        if (m_restoringSession) {
-            m_restoringSession = false;
-            emit restoringSessionChanged();
-        }
-        emit authenticationChanged();
-
-        if (firstLoad) {
-            const QString userId = extractUserIdFromToken(accessToken);
-            if (userId.isEmpty()) {
-                clearTokens();
-                emit authenticationChanged();
-                return;
-            }
-            fetchUserInfo(userId);
-        }
-    });
+    startTokenRefresh(true);
 }
 
 void AuthClient::storeTokens(const QString& accessToken, const QString& refreshToken)
@@ -273,6 +251,110 @@ void AuthClient::clearTokens()
     QSettings settings("ChatAppProj", "ChatApp");
     settings.remove("accessToken");
     settings.remove("refreshToken");
+}
+
+void AuthClient::startTokenRefresh(bool allowTransientRetries)
+{
+    if (m_refreshToken.isEmpty() || m_refreshInProgress)
+        return;
+
+    m_refreshTimer.stop();
+    m_refreshInProgress = true;
+
+    QJsonObject json;
+    json["refresh_token"] = m_refreshToken;
+
+    QNetworkReply *reply = m_networkClient.post("/auth/refresh", json);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, allowTransientRetries]() {
+        finalizeTokenRefresh(reply, allowTransientRetries);
+    });
+}
+
+void AuthClient::finalizeTokenRefresh(QNetworkReply *reply, bool allowTransientRetries)
+{
+    reply->deleteLater();
+    m_refreshInProgress = false;
+
+    const JsonObjectResponse response = m_networkClient.jsonResponse<QJsonObject>(reply);
+    if (!response.ok) {
+        const bool wasRestoring = m_restoringSession;
+        const bool authenticationRejected = response.statusCode == 401 || response.statusCode == 403;
+
+        if (authenticationRejected) {
+            m_refreshRetryCount = 0;
+            m_refreshTimer.stop();
+            clearTokens();
+            if (wasRestoring) {
+                m_restoringSession = false;
+                emit restoringSessionChanged();
+            }
+            emit authenticationChanged();
+            emit accessTokenRefreshFinished(false, true);
+            return;
+        }
+
+        if (allowTransientRetries && m_refreshRetryCount < MAX_REFRESH_RETRIES) {
+            const int delay = INITIAL_RETRY_DELAY_MS * (1 << m_refreshRetryCount);
+            ++m_refreshRetryCount;
+            QTimer::singleShot(delay, this, [this]() {
+                startTokenRefresh(true);
+            });
+            return;
+        }
+
+        m_refreshRetryCount = 0;
+        scheduleDeferredRefreshRetry();
+        if (wasRestoring) {
+            m_restoringSession = false;
+            emit restoringSessionChanged();
+        }
+        emit accessTokenRefreshFinished(false, false);
+        return;
+    }
+
+    m_refreshRetryCount = 0;
+
+    const QString accessToken = response.data.value("access_token").toString();
+    const QString refreshToken = response.data.value("refresh_token").toString();
+    if (accessToken.isEmpty() || refreshToken.isEmpty()) {
+        scheduleDeferredRefreshRetry();
+        if (m_restoringSession) {
+            m_restoringSession = false;
+            emit restoringSessionChanged();
+        }
+        emit accessTokenRefreshFinished(false, false);
+        return;
+    }
+
+    const bool firstLoad = !m_userLoaded;
+    storeTokens(accessToken, refreshToken);
+
+    if (m_restoringSession) {
+        m_restoringSession = false;
+        emit restoringSessionChanged();
+    }
+    emit authenticationChanged();
+
+    if (firstLoad) {
+        const QString userId = extractUserIdFromToken(accessToken);
+        if (userId.isEmpty()) {
+            clearTokens();
+            emit authenticationChanged();
+            emit accessTokenRefreshFinished(false, false);
+            return;
+        }
+        fetchUserInfo(userId);
+    }
+
+    emit accessTokenRefreshFinished(true, false);
+}
+
+void AuthClient::scheduleDeferredRefreshRetry()
+{
+    if (m_refreshToken.isEmpty())
+        return;
+
+    m_refreshTimer.start(DEFERRED_REFRESH_RETRY_MS);
 }
 
 void AuthClient::scheduleTokenRefresh(const QString& accessToken)

@@ -1,11 +1,21 @@
 #include "networkClient.h"
 
+#include "authclient.h"
+
+#include <QEventLoop>
 #include <QJsonDocument>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 
 static const QString BASE_URL = QStringLiteral("http://localhost:3000");
+
+constexpr const char *MethodProperty = "chatappMethod";
+constexpr const char *PathProperty = "chatappPath";
+constexpr const char *BodyProperty = "chatappBody";
+constexpr const char *WithAuthProperty = "chatappWithAuth";
+constexpr const char *AuthRetryCountProperty = "chatappAuthRetryCount";
+constexpr const char *AuthTokenProperty = "chatappAuthToken";
 
 QString NetworkClient::defaultInvalidJsonMessage(const QString &invalidMessage)
 {
@@ -19,33 +29,109 @@ NetworkClient::NetworkClient(QObject *parent)
 
 QNetworkReply *NetworkClient::get(const QString &path, bool withAuth)
 {
-    return m_networkManager->get(makeRequest(path, withAuth));
+    return send(QStringLiteral("GET"), path, QByteArray(), withAuth);
 }
 
 QNetworkReply *NetworkClient::post(const QString &path, const QJsonObject &payload, bool withAuth)
 {
-    return m_networkManager->post(makeRequest(path, withAuth), QJsonDocument(payload).toJson());
+    return send(QStringLiteral("POST"), path, QJsonDocument(payload).toJson(), withAuth);
 }
 
 QNetworkReply *NetworkClient::patch(const QString &path, const QJsonObject &payload, bool withAuth)
 {
-    return m_networkManager->sendCustomRequest(
-        makeRequest(path, withAuth),
-        "PATCH",
-        QJsonDocument(payload).toJson());
+    return send(QStringLiteral("PATCH"), path, QJsonDocument(payload).toJson(), withAuth);
 }
 
 QNetworkReply *NetworkClient::put(const QString &path, const QJsonObject &payload, bool withAuth)
 {
-    return m_networkManager->put(makeRequest(path, withAuth), QJsonDocument(payload).toJson());
+    return send(QStringLiteral("PUT"), path, QJsonDocument(payload).toJson(), withAuth);
 }
 
 QNetworkReply *NetworkClient::deleteResource(const QString &path, bool withAuth)
 {
-    return m_networkManager->deleteResource(makeRequest(path, withAuth));
+    return send(QStringLiteral("DELETE"), path, QByteArray(), withAuth);
+}
+
+QNetworkReply *NetworkClient::send(const QString &method,
+                                   const QString &path,
+                                   const QByteArray &body,
+                                   bool withAuth,
+                                   int authRetryCount) const
+{
+    const QNetworkRequest request = makeRequest(path, withAuth);
+
+    QNetworkReply *reply = nullptr;
+    if (method == QLatin1String("GET")) {
+        reply = m_networkManager->get(request);
+    } else if (method == QLatin1String("POST")) {
+        reply = m_networkManager->post(request, body);
+    } else if (method == QLatin1String("PATCH")) {
+        reply = m_networkManager->sendCustomRequest(request, "PATCH", body);
+    } else if (method == QLatin1String("PUT")) {
+        reply = m_networkManager->put(request, body);
+    } else if (method == QLatin1String("DELETE")) {
+        reply = m_networkManager->deleteResource(request);
+    }
+
+    if (reply == nullptr)
+        return nullptr;
+
+    reply->setProperty(MethodProperty, method);
+    reply->setProperty(PathProperty, path);
+    reply->setProperty(BodyProperty, body);
+    reply->setProperty(WithAuthProperty, withAuth);
+    reply->setProperty(AuthRetryCountProperty, authRetryCount);
+    reply->setProperty(AuthTokenProperty, withAuth ? s_accessToken : QString());
+
+    return reply;
 }
 
 NetworkResponse NetworkClient::response(QNetworkReply *reply, const QString &fallbackMessage) const
+{
+    NetworkResponse result = buildResponse(reply, fallbackMessage);
+    if (reply == nullptr)
+        return result;
+
+    const QString method = reply->property(MethodProperty).toString();
+    const QString path = reply->property(PathProperty).toString();
+    const QByteArray body = reply->property(BodyProperty).toByteArray();
+    const bool withAuth = reply->property(WithAuthProperty).toBool();
+    const int authRetryCount = reply->property(AuthRetryCountProperty).toInt();
+    const QString requestToken = reply->property(AuthTokenProperty).toString();
+
+    if (result.statusCode != 401
+        || !withAuth
+        || authRetryCount > 0
+        || method.isEmpty()
+        || path == QLatin1String("/auth/refresh")) {
+        return result;
+    }
+
+    const bool canRetryWithCurrentToken = !s_accessToken.isEmpty() && requestToken != s_accessToken;
+    if (!canRetryWithCurrentToken) {
+        AuthClient *authClient = AuthClient::instance();
+        if (authClient == nullptr || !authClient->refreshAccessTokenBlocking())
+            return result;
+    }
+
+    if (s_accessToken.isEmpty())
+        return result;
+
+    QNetworkReply *retryReply = send(method, path, body, withAuth, authRetryCount + 1);
+    if (retryReply == nullptr)
+        return result;
+
+    QEventLoop loop;
+    connect(retryReply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    loop.exec();
+
+    NetworkResponse retryResult = buildResponse(retryReply, fallbackMessage);
+    retryReply->deleteLater();
+    return retryResult;
+}
+
+NetworkResponse NetworkClient::buildResponse(QNetworkReply *reply,
+                                             const QString &fallbackMessage) const
 {
     NetworkResponse result;
     if (reply == nullptr) {
