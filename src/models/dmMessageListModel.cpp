@@ -8,16 +8,25 @@
 
 namespace
 {
+    constexpr qint64 messageGroupWindowSeconds = 5 * 60;
+
     QString messageIdFromJson(const QJsonObject &object)
     {
         return object.value(QLatin1String("message_id")).toString();
     }
 
-    QString formatTimeLabel(const QString &createdAt)
+    QDateTime parseCreatedAt(const QString &createdAt)
     {
         QDateTime timestamp = QDateTime::fromString(createdAt, Qt::ISODateWithMs);
         if (!timestamp.isValid())
             timestamp = QDateTime::fromString(createdAt, Qt::ISODate);
+
+        return timestamp;
+    }
+
+    QString formatTimeLabel(const QString &createdAt)
+    {
+        const QDateTime timestamp = parseCreatedAt(createdAt);
 
         if (!timestamp.isValid())
             return {};
@@ -85,6 +94,32 @@ QHash<int, QByteArray> DmMessageListModel::roleNames() const
         { IsSelfRole, "isSelf" },
         { IsDeletedRole, "isDeleted" },
     };
+}
+
+bool DmMessageListModel::shouldShowSenderInfo(const int row) const
+{
+    const qsizetype messageCount = m_messages.size();
+
+    if (row < 0 || row >= messageCount || row + 1 >= messageCount)
+        return true;
+
+    const MessageItem &message = m_messages.at(row);
+    const MessageItem &previousMessage = m_messages.at(row + 1);
+
+    if (message.senderId.isEmpty() || previousMessage.senderId.isEmpty())
+        return true;
+
+    if (message.senderId != previousMessage.senderId)
+        return true;
+
+    const QDateTime messageTime = parseCreatedAt(message.createdAt);
+    const QDateTime previousMessageTime = parseCreatedAt(previousMessage.createdAt);
+
+    if (!messageTime.isValid() || !previousMessageTime.isValid())
+        return true;
+
+    const qint64 messageGapSeconds = previousMessageTime.secsTo(messageTime);
+    return messageGapSeconds < 0 || messageGapSeconds > messageGroupWindowSeconds;
 }
 
 void DmMessageListModel::reset(const QJsonArray &messages, const QString &currentUserId)

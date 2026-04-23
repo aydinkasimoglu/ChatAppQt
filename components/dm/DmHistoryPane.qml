@@ -150,6 +150,7 @@ Item {
         visible: historyPane.hasConversation
         model: DmManager.messages
         spacing: 4
+        leftMargin: 15
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         flickableDirection: Flickable.VerticalFlick
@@ -228,10 +229,13 @@ Item {
         }
 
         delegate: DmMessageBubble {
+            required property int index
             required property string messageId
+            readonly property int messageCount: DmManager.messages.count
 
             x: historyList.sidePadding
             width: historyList.width - historyList.sidePadding * 2
+            showSenderInfo: messageCount >= 0 && DmManager.messages.shouldShowSenderInfo(index)
         }
 
         ScrollBar.vertical: ScrollBar {
