@@ -22,10 +22,17 @@ QString NetworkClient::defaultInvalidJsonMessage(const QString &invalidMessage)
     return invalidMessage.isEmpty() ? QStringLiteral("Invalid server response") : invalidMessage;
 }
 
-NetworkClient::NetworkClient(QObject *parent)
-    : QObject(parent)
-    , m_networkManager(new QNetworkAccessManager(this))
+NetworkClient &NetworkClient::instance()
+{
+    static NetworkClient s_instance;
+    return s_instance;
+}
+
+NetworkClient::NetworkClient()
+    : m_networkManager(std::make_unique<QNetworkAccessManager>())
 {}
+
+NetworkClient::~NetworkClient() = default;
 
 QNetworkReply *NetworkClient::get(const QString &path, bool withAuth)
 {
@@ -122,7 +129,7 @@ NetworkResponse NetworkClient::response(QNetworkReply *reply, const QString &fal
         return result;
 
     QEventLoop loop;
-    connect(retryReply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    QObject::connect(retryReply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
     loop.exec();
 
     NetworkResponse retryResult = buildResponse(retryReply, fallbackMessage);

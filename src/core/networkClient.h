@@ -1,13 +1,13 @@
 #ifndef NETWORKCLIENT_H
 #define NETWORKCLIENT_H
 
-#include <QObject>
 #include <QByteArray>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkReply>
 
+#include <memory>
 #include <type_traits>
 
 class QNetworkAccessManager;
@@ -34,12 +34,13 @@ struct JsonResponse : NetworkResponse
 using JsonObjectResponse = JsonResponse<QJsonObject>;
 using JsonArrayResponse = JsonResponse<QJsonArray>;
 
-class NetworkClient : public QObject
+class NetworkClient
 {
-    Q_OBJECT
-
 public:
-    explicit NetworkClient(QObject *parent = nullptr);
+    static NetworkClient &instance();
+
+    NetworkClient(const NetworkClient &) = delete;
+    NetworkClient &operator=(const NetworkClient &) = delete;
 
     QNetworkReply *get(const QString &path, bool withAuth = false);
     QNetworkReply *post(const QString &path, const QJsonObject &payload, bool withAuth = false);
@@ -92,6 +93,9 @@ public:
     }
 
 private:
+    NetworkClient();
+    ~NetworkClient();
+
     QNetworkReply *send(const QString &method,
                         const QString &path,
                         const QByteArray &body = QByteArray(),
@@ -104,7 +108,7 @@ private:
                                   const QString &fallbackMessage) const;
     QNetworkRequest makeRequest(const QString &path, bool withAuth) const;
 
-    QNetworkAccessManager *m_networkManager;
+    std::unique_ptr<QNetworkAccessManager> m_networkManager;
     static inline QString s_accessToken;
 };
 

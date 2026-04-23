@@ -26,6 +26,7 @@ public:
 
     QString email() const { return m_email; }
     QString username() const { return m_username; }
+    QString userId() const { return m_userId; }
 
     void setEmail(const QString& email) { m_email = email; }
     void setUsername(const QString& username) { m_username = username; }
@@ -66,7 +67,6 @@ private:
     void finalizeTokenRefresh(QNetworkReply *reply, bool allowTransientRetries);
     void scheduleDeferredRefreshRetry();
 
-    NetworkClient m_networkClient;
     QTimer m_refreshTimer;
 
     QString m_accessToken;
@@ -77,7 +77,7 @@ private:
     bool m_refreshInProgress = false;
     int m_refreshRetryCount = 0;
 
-    QString m_email, m_username;
+    QString m_email, m_username, m_userId;
 
     static inline AuthClient *s_instance = nullptr;
 };

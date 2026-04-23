@@ -1,5 +1,7 @@
 #include "serverManager.h"
 
+#include "networkClient.h"
+
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -17,12 +19,12 @@ void ServerManager::setLoading(bool loading)
 void ServerManager::fetchMyServers()
 {
     setLoading(true);
-    QNetworkReply *reply = m_networkClient.get("/servers/mine", true);
+    QNetworkReply *reply = NetworkClient::instance().get("/servers/mine", true);
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
         setLoading(false);
 
-        const JsonArrayResponse response = m_networkClient.jsonResponse<QJsonArray>(reply);
+        const JsonArrayResponse response = NetworkClient::instance().jsonResponse<QJsonArray>(reply);
         if (!response.ok) {
             if (response.networkError != QNetworkReply::NoError) {
                 qDebug() << "[ServerManager] fetchMyServers network error:"
@@ -41,12 +43,12 @@ void ServerManager::fetchMyServers()
 void ServerManager::fetchPublicServers()
 {
     setLoading(true);
-    QNetworkReply *reply = m_networkClient.get("/servers/public");
+    QNetworkReply *reply = NetworkClient::instance().get("/servers/public");
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
         setLoading(false);
 
-        const JsonArrayResponse response = m_networkClient.jsonResponse<QJsonArray>(reply);
+        const JsonArrayResponse response = NetworkClient::instance().jsonResponse<QJsonArray>(reply);
         if (!response.ok) return;
 
         m_publicServers.reset(response.data);
@@ -61,11 +63,11 @@ void ServerManager::createServer(const QString &name, bool isPublic, const QStri
     if (!description.isEmpty())
         body["description"] = description;
 
-    QNetworkReply *reply = m_networkClient.post("/servers", body, true);
+    QNetworkReply *reply = NetworkClient::instance().post("/servers", body, true);
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
 
-        const JsonObjectResponse response = m_networkClient.jsonResponse<QJsonObject>(reply);
+        const JsonObjectResponse response = NetworkClient::instance().jsonResponse<QJsonObject>(reply);
         if (!response.ok) {
             emit serverCreateFailed(response.errorMessage);
             return;
@@ -86,11 +88,11 @@ void ServerManager::updateServer(const QString &serverId, const QString &name,
     if (!description.isEmpty())
         body["description"] = description;
 
-    QNetworkReply *reply = m_networkClient.put("/servers/" + serverId, body, true);
+    QNetworkReply *reply = NetworkClient::instance().put("/servers/" + serverId, body, true);
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
 
-        const JsonObjectResponse response = m_networkClient.jsonResponse<QJsonObject>(reply);
+        const JsonObjectResponse response = NetworkClient::instance().jsonResponse<QJsonObject>(reply);
         if (!response.ok) {
             emit serverUpdateFailed(response.errorMessage);
             return;
@@ -103,11 +105,11 @@ void ServerManager::updateServer(const QString &serverId, const QString &name,
 
 void ServerManager::deleteServer(const QString &serverId)
 {
-    QNetworkReply *reply = m_networkClient.deleteResource("/servers/" + serverId, true);
+    QNetworkReply *reply = NetworkClient::instance().deleteResource("/servers/" + serverId, true);
     connect(reply, &QNetworkReply::finished, this, [this, reply, serverId]() {
         reply->deleteLater();
 
-        const NetworkResponse response = m_networkClient.response(reply);
+        const NetworkResponse response = NetworkClient::instance().response(reply);
         if (!response.ok) {
             emit serverDeleteFailed(response.errorMessage);
             return;

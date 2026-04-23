@@ -23,12 +23,12 @@ void FriendshipManager::endLoad()
 void FriendshipManager::fetchFriends()
 {
     beginLoad();
-    QNetworkReply *reply = m_networkClient.get("/friends", true);
+    QNetworkReply *reply = NetworkClient::instance().get("/friends", true);
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
         endLoad();
 
-        const JsonArrayResponse r = m_networkClient.jsonResponse<QJsonArray>(reply);
+        const JsonArrayResponse r = NetworkClient::instance().jsonResponse<QJsonArray>(reply);
         if (!r.ok) {
             qDebug() << "[FriendshipManager] fetchFriends failed:" << r.errorMessage;
             return;
@@ -45,10 +45,10 @@ void FriendshipManager::fetchPendingRequests()
 
     beginLoad();
 
-    QNetworkReply *inReply = m_networkClient.get("/friends/requests/incoming", true);
+    QNetworkReply *inReply = NetworkClient::instance().get("/friends/requests/incoming", true);
     connect(inReply, &QNetworkReply::finished, this, [this, inReply, s]() {
         inReply->deleteLater();
-        const JsonArrayResponse r = m_networkClient.jsonResponse<QJsonArray>(inReply);
+        const JsonArrayResponse r = NetworkClient::instance().jsonResponse<QJsonArray>(inReply);
         if (r.ok)
             s->incoming = r.data;
         else
@@ -59,10 +59,10 @@ void FriendshipManager::fetchPendingRequests()
         }
     });
 
-    QNetworkReply *outReply = m_networkClient.get("/friends/requests/outgoing", true);
+    QNetworkReply *outReply = NetworkClient::instance().get("/friends/requests/outgoing", true);
     connect(outReply, &QNetworkReply::finished, this, [this, outReply, s]() {
         outReply->deleteLater();
-        const JsonArrayResponse r = m_networkClient.jsonResponse<QJsonArray>(outReply);
+        const JsonArrayResponse r = NetworkClient::instance().jsonResponse<QJsonArray>(outReply);
         if (r.ok)
             s->outgoing = r.data;
         else
@@ -79,11 +79,11 @@ void FriendshipManager::sendFriendRequest(const QString &username)
     QJsonObject body;
     body["username"] = username;
 
-    QNetworkReply *reply = m_networkClient.post("/friends/requests", body, true);
+    QNetworkReply *reply = NetworkClient::instance().post("/friends/requests", body, true);
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
 
-        const JsonObjectResponse r = m_networkClient.jsonResponse<QJsonObject>(reply);
+        const JsonObjectResponse r = NetworkClient::instance().jsonResponse<QJsonObject>(reply);
         if (!r.ok) {
             emit friendRequestFailed(r.errorMessage);
             return;
@@ -95,12 +95,12 @@ void FriendshipManager::sendFriendRequest(const QString &username)
 
 void FriendshipManager::acceptRequest(const QString &friendshipId)
 {
-    QNetworkReply *reply = m_networkClient.put(
+    QNetworkReply *reply = NetworkClient::instance().put(
         "/friends/requests/" + friendshipId + "/accept", {}, true);
     connect(reply, &QNetworkReply::finished, this, [this, reply, friendshipId]() {
         reply->deleteLater();
 
-        const JsonObjectResponse r = m_networkClient.jsonResponse<QJsonObject>(reply);
+        const JsonObjectResponse r = NetworkClient::instance().jsonResponse<QJsonObject>(reply);
         if (!r.ok) {
             emit requestAcceptFailed(r.errorMessage);
             return;
@@ -114,12 +114,12 @@ void FriendshipManager::acceptRequest(const QString &friendshipId)
 
 void FriendshipManager::rejectRequest(const QString &friendshipId)
 {
-    QNetworkReply *reply = m_networkClient.put(
+    QNetworkReply *reply = NetworkClient::instance().put(
         "/friends/requests/" + friendshipId + "/reject", {}, true);
     connect(reply, &QNetworkReply::finished, this, [this, reply, friendshipId]() {
         reply->deleteLater();
 
-        const JsonObjectResponse r = m_networkClient.jsonResponse<QJsonObject>(reply);
+        const JsonObjectResponse r = NetworkClient::instance().jsonResponse<QJsonObject>(reply);
         if (!r.ok) {
             emit requestRejectFailed(r.errorMessage);
             return;
@@ -132,12 +132,12 @@ void FriendshipManager::rejectRequest(const QString &friendshipId)
 
 void FriendshipManager::cancelRequest(const QString &friendshipId)
 {
-    QNetworkReply *reply = m_networkClient.deleteResource(
+    QNetworkReply *reply = NetworkClient::instance().deleteResource(
         "/friends/requests/" + friendshipId + "/cancel", true);
     connect(reply, &QNetworkReply::finished, this, [this, reply, friendshipId]() {
         reply->deleteLater();
 
-        const NetworkResponse r = m_networkClient.response(reply);
+        const NetworkResponse r = NetworkClient::instance().response(reply);
         if (!r.ok) {
             emit requestCancelFailed(r.errorMessage);
             return;
@@ -150,11 +150,11 @@ void FriendshipManager::cancelRequest(const QString &friendshipId)
 
 void FriendshipManager::removeFriend(const QString &friendshipId)
 {
-    QNetworkReply *reply = m_networkClient.deleteResource("/friends/" + friendshipId, true);
+    QNetworkReply *reply = NetworkClient::instance().deleteResource("/friends/" + friendshipId, true);
     connect(reply, &QNetworkReply::finished, this, [this, reply, friendshipId]() {
         reply->deleteLater();
 
-        const NetworkResponse r = m_networkClient.response(reply);
+        const NetworkResponse r = NetworkClient::instance().response(reply);
         if (!r.ok) {
             emit friendRemoveFailed(r.errorMessage);
             return;
@@ -168,12 +168,12 @@ void FriendshipManager::removeFriend(const QString &friendshipId)
 void FriendshipManager::fetchBlockedUsers()
 {
     beginLoad();
-    QNetworkReply *reply = m_networkClient.get("/blocks", true);
+    QNetworkReply *reply = NetworkClient::instance().get("/blocks", true);
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
         endLoad();
 
-        const JsonArrayResponse r = m_networkClient.jsonResponse<QJsonArray>(reply);
+        const JsonArrayResponse r = NetworkClient::instance().jsonResponse<QJsonArray>(reply);
         if (!r.ok) {
             qDebug() << "[FriendshipManager] fetchBlockedUsers failed:" << r.errorMessage;
             return;
@@ -185,11 +185,11 @@ void FriendshipManager::fetchBlockedUsers()
 
 void FriendshipManager::unblockUser(const QString &userId)
 {
-    QNetworkReply *reply = m_networkClient.deleteResource("/blocks/" + userId, true);
+    QNetworkReply *reply = NetworkClient::instance().deleteResource("/blocks/" + userId, true);
     connect(reply, &QNetworkReply::finished, this, [this, reply, userId]() {
         reply->deleteLater();
 
-        const NetworkResponse r = m_networkClient.response(reply);
+        const NetworkResponse r = NetworkClient::instance().response(reply);
         if (!r.ok) {
             emit unblockFailed(r.errorMessage);
             return;

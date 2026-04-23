@@ -91,9 +91,6 @@ private:
                                 const QString &directPartnerId);
     void syncCurrentConversationFromModel();
 
-    QString currentUserId() const;
-
-    NetworkClient m_networkClient;
     DmConversationListModel m_conversations;
     DmMessageListModel m_messages;
 

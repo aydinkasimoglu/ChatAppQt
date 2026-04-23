@@ -8,7 +8,6 @@
 #include <QQmlEngine>
 #include <qqmlintegration.h>
 
-#include "networkClient.h"
 #include "serverListModel.h"
 
 class ServerManager : public QObject
@@ -51,7 +50,6 @@ signals:
     void serverDeleteFailed(QString message);
 
 private:
-    NetworkClient m_networkClient;
     ServerListModel m_myServers;
     ServerListModel m_publicServers;
     bool m_loading = false;

@@ -120,12 +120,12 @@ void AuthClient::login(const QString& email, const QString& password)
     json["email"] = email;
     json["password"] = password;
 
-    QNetworkReply *reply = m_networkClient.post("/login", json);
+    QNetworkReply *reply = NetworkClient::instance().post("/login", json);
 
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
 
-        const JsonObjectResponse response = m_networkClient.jsonResponse<QJsonObject>(
+        const JsonObjectResponse response = NetworkClient::instance().jsonResponse<QJsonObject>(
             reply, "Wrong e-mail address or password.");
         if (!response.ok) {
             emit loginFailed(response.errorMessage);
@@ -159,12 +159,12 @@ void AuthClient::signup(const QString& email, const QString& username, const QSt
     json["username"] = username;
     json["password"] = password;
 
-    QNetworkReply *reply = m_networkClient.post("/signup", json);
+    QNetworkReply *reply = NetworkClient::instance().post("/signup", json);
 
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
 
-        const NetworkResponse response = m_networkClient.response(reply);
+        const NetworkResponse response = NetworkClient::instance().response(reply);
         if (!response.ok) {
             emit signupFailed(response.errorMessage);
             return;
@@ -180,7 +180,7 @@ void AuthClient::logout()
         QJsonObject json;
         json["refresh_token"] = m_refreshToken;
         // Fire-and-forget: revoke the refresh token on the server.
-        QNetworkReply *reply = m_networkClient.post("/auth/logout", json, true);
+        QNetworkReply *reply = NetworkClient::instance().post("/auth/logout", json, true);
         connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
     }
 
@@ -190,12 +190,12 @@ void AuthClient::logout()
 
 void AuthClient::fetchUserInfo(const QString& userId)
 {
-    QNetworkReply *reply = m_networkClient.get("/users/" + userId, true);
+    QNetworkReply *reply = NetworkClient::instance().get("/users/" + userId, true);
 
     connect(reply, &QNetworkReply::finished, this, [this, reply] {
         reply->deleteLater();
 
-        const JsonObjectResponse response = m_networkClient.jsonResponse<QJsonObject>(
+        const JsonObjectResponse response = NetworkClient::instance().jsonResponse<QJsonObject>(
             reply, QString(), "Invalid user data from server.");
         if (!response.ok) {
             if (response.networkError == QNetworkReply::ContentNotFoundError) {
@@ -228,6 +228,7 @@ void AuthClient::storeTokens(const QString& accessToken, const QString& refreshT
 {
     m_accessToken  = accessToken;
     m_refreshToken = refreshToken;
+    m_userId = extractUserIdFromToken(accessToken);
 
     NetworkClient::setAccessToken(accessToken);
 
@@ -241,6 +242,7 @@ void AuthClient::clearTokens()
 {
     m_accessToken.clear();
     m_refreshToken.clear();
+    m_userId.clear();
     m_userLoaded = false;
     m_refreshInProgress = false;
     m_refreshRetryCount = 0;
@@ -264,7 +266,7 @@ void AuthClient::startTokenRefresh(bool allowTransientRetries)
     QJsonObject json;
     json["refresh_token"] = m_refreshToken;
 
-    QNetworkReply *reply = m_networkClient.post("/auth/refresh", json);
+    QNetworkReply *reply = NetworkClient::instance().post("/auth/refresh", json);
     connect(reply, &QNetworkReply::finished, this, [this, reply, allowTransientRetries]() {
         finalizeTokenRefresh(reply, allowTransientRetries);
     });
@@ -275,7 +277,7 @@ void AuthClient::finalizeTokenRefresh(QNetworkReply *reply, bool allowTransientR
     reply->deleteLater();
     m_refreshInProgress = false;
 
-    const JsonObjectResponse response = m_networkClient.jsonResponse<QJsonObject>(reply);
+    const JsonObjectResponse response = NetworkClient::instance().jsonResponse<QJsonObject>(reply);
     if (!response.ok) {
         const bool wasRestoring = m_restoringSession;
         const bool authenticationRejected = response.statusCode == 401 || response.statusCode == 403;

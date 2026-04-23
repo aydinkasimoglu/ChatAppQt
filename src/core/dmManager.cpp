@@ -1,4 +1,5 @@
 #include "dmManager.h"
+#include "authClient.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -9,21 +10,13 @@ namespace {
 
 constexpr int MessagePageSize = 50;
 
-QJsonObject decodeJwtPayload(const QString &token)
+bool responseHasOlderMessages(const QJsonObject &response)
 {
-    const QStringList parts = token.split('.');
-    if (parts.size() != 3)
-        return {};
+    const QJsonValue hasOlderValue = response.value(QStringLiteral("has_older"));
+    if (hasOlderValue.isBool())
+        return hasOlderValue.toBool();
 
-    const QByteArray decoded = QByteArray::fromBase64(
-        parts[1].toUtf8(), QByteArray::Base64UrlEncoding);
-    const QJsonDocument document = QJsonDocument::fromJson(decoded);
-    return document.isObject() ? document.object() : QJsonObject{};
-}
-
-QString extractUserIdFromToken(const QString &token)
-{
-    return decodeJwtPayload(token).value("sub").toString();
+    return !response.value(QStringLiteral("next_before_message_id")).toString().isEmpty();
 }
 
 }
@@ -36,12 +29,12 @@ void DmManager::fetchConversations()
 {
     setConversationsLoading(true);
 
-    QNetworkReply *reply = m_networkClient.get("/conversations?limit=50", true);
+    QNetworkReply *reply = NetworkClient::instance().get("/conversations?limit=50", true);
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
         setConversationsLoading(false);
 
-        const JsonObjectResponse response = m_networkClient.jsonResponse<QJsonObject>(
+        const JsonObjectResponse response = NetworkClient::instance().jsonResponse<QJsonObject>(
             reply,
             QStringLiteral("Couldn't load direct messages."),
             QStringLiteral("Invalid direct message history response."));
@@ -56,7 +49,7 @@ void DmManager::fetchConversations()
             return;
         }
 
-        m_conversations.reset(itemsValue.toArray(), currentUserId());
+        m_conversations.reset(itemsValue.toArray(), AuthClient::instance()->userId());
         syncCurrentConversationFromModel();
     });
 }
@@ -84,7 +77,7 @@ void DmManager::openDirectConversation(const QString &userId, const QString &use
     QJsonObject payload;
     payload["participant_ids"] = QJsonArray{ userId };
 
-    QNetworkReply *reply = m_networkClient.post("/conversations", payload, true);
+    QNetworkReply *reply = NetworkClient::instance().post("/conversations", payload, true);
     connect(reply, &QNetworkReply::finished, this, [this, reply, userId, username]() {
         reply->deleteLater();
 
@@ -95,7 +88,7 @@ void DmManager::openDirectConversation(const QString &userId, const QString &use
 
         setOpeningConversation(false);
 
-        const JsonObjectResponse response = m_networkClient.jsonResponse<QJsonObject>(
+        const JsonObjectResponse response = NetworkClient::instance().jsonResponse<QJsonObject>(
             reply,
             QStringLiteral("Couldn't open direct message."),
             QStringLiteral("Invalid direct message response."));
@@ -181,7 +174,7 @@ void DmManager::loadOlderMessages()
 
     setLoadingOlderMessages(true);
 
-    QNetworkReply *reply = m_networkClient.get(
+    QNetworkReply *reply = NetworkClient::instance().get(
         QStringLiteral("/conversations/%1/messages?limit=%2&before_message_id=%3")
             .arg(conversationId)
             .arg(MessagePageSize)
@@ -194,7 +187,7 @@ void DmManager::loadOlderMessages()
             return;
         }
 
-        const JsonObjectResponse response = m_networkClient.jsonResponse<QJsonObject>(
+        const JsonObjectResponse response = NetworkClient::instance().jsonResponse<QJsonObject>(
             reply,
             QStringLiteral("Couldn't load older direct messages."),
             QStringLiteral("Invalid direct message history response."));
@@ -212,11 +205,11 @@ void DmManager::loadOlderMessages()
         }
 
         const QJsonArray items = itemsValue.toArray();
-        const bool hasOlder = response.data.value("has_older").toBool();
+        const bool hasOlder = responseHasOlderMessages(response.data);
         setHistoryStartReached(!hasOlder);
 
         if (!items.isEmpty())
-            m_messages.appendOlderPage(items, currentUserId());
+            m_messages.appendOlderPage(items, AuthClient::instance()->userId());
 
         setLoadingOlderMessages(false);
     });
@@ -237,14 +230,14 @@ void DmManager::sendMessage(const QString &text)
     QJsonObject payload;
     payload["content"] = content;
 
-    QNetworkReply *reply = m_networkClient.post(
+    QNetworkReply *reply = NetworkClient::instance().post(
         QStringLiteral("/conversations/") + conversationId + QStringLiteral("/messages"),
         payload,
         true);
     connect(reply, &QNetworkReply::finished, this, [this, reply, conversationId]() {
         reply->deleteLater();
 
-        const JsonObjectResponse response = m_networkClient.jsonResponse<QJsonObject>(
+        const JsonObjectResponse response = NetworkClient::instance().jsonResponse<QJsonObject>(
             reply,
             QStringLiteral("Couldn't send direct message."),
             QStringLiteral("Invalid direct message response."));
@@ -254,9 +247,14 @@ void DmManager::sendMessage(const QString &text)
         }
 
         if (conversationId == m_currentConversationId)
-            m_messages.prependMessage(response.data, currentUserId());
+            m_messages.prependMessage(response.data, AuthClient::instance()->userId());
 
-        fetchConversations();
+        m_conversations.updateConversationFromMessage(
+            conversationId,
+            response.data.toVariantMap(), 
+            AuthClient::instance()->userId(), 
+            true
+        );
         emit messageSent();
     });
 }
@@ -266,7 +264,7 @@ void DmManager::handleIncomingMessage(const QString &conversationId, const QVari
     const bool isActive = (conversationId == m_currentConversationId);
 
     // Update conversation list locally (Title, unread counts, moves to top)
-    m_conversations.updateConversationFromMessage(conversationId, message, currentUserId(), isActive);
+    m_conversations.updateConversationFromMessage(conversationId, message, AuthClient::instance()->userId(), isActive);
 
     // If it is NOT in our list (like a brand new DM), fetch from the server
     if (!m_conversations.containsConversation(conversationId)) {
@@ -275,7 +273,7 @@ void DmManager::handleIncomingMessage(const QString &conversationId, const QVari
 
     // Show the new message immediately if we are looking at this chat
     if (isActive) {
-        m_messages.prependMessage(message, currentUserId());
+        m_messages.prependMessage(message, AuthClient::instance()->userId());
     }
 }
 
@@ -302,7 +300,7 @@ void DmManager::loadMessages(const QString &conversationId)
     resetMessagePaginationState();
     setMessagesLoading(true);
 
-    QNetworkReply *reply = m_networkClient.get(
+    QNetworkReply *reply = NetworkClient::instance().get(
         QStringLiteral("/conversations/") + conversationId
             + QStringLiteral("/messages?limit=%1").arg(MessagePageSize),
         true);
@@ -315,7 +313,7 @@ void DmManager::loadMessages(const QString &conversationId)
 
         setMessagesLoading(false);
 
-        const JsonObjectResponse response = m_networkClient.jsonResponse<QJsonObject>(
+        const JsonObjectResponse response = NetworkClient::instance().jsonResponse<QJsonObject>(
             reply,
             QStringLiteral("Couldn't load direct message history."),
             QStringLiteral("Invalid direct message history response."));
@@ -331,9 +329,9 @@ void DmManager::loadMessages(const QString &conversationId)
         }
 
         const QJsonArray items = itemsValue.toArray();
-        const bool hasOlder = response.data.value("has_older").toBool();
+        const bool hasOlder = responseHasOlderMessages(response.data);
         setHistoryStartReached(!hasOlder);
-        m_messages.reset(items, currentUserId());
+        m_messages.reset(items, AuthClient::instance()->userId());
     });
 }
 
@@ -345,18 +343,18 @@ void DmManager::markConversationRead(const QString &conversationId, const QStrin
     QJsonObject payload;
     payload["up_to_message_id"] = messageId;
 
-    QNetworkReply *reply = m_networkClient.patch(
+    QNetworkReply *reply = NetworkClient::instance().patch(
         QStringLiteral("/conversations/") + conversationId + QStringLiteral("/read"),
         payload,
         true);
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, conversationId]() {
         reply->deleteLater();
 
-        const NetworkResponse response = m_networkClient.response(reply);
+        const NetworkResponse response = NetworkClient::instance().response(reply);
         if (!response.ok)
             return;
 
-        fetchConversations();
+        m_conversations.clearUnreadCount(conversationId);
     });
 }
 
@@ -440,9 +438,4 @@ void DmManager::resetMessagePaginationState()
 {
     setLoadingOlderMessages(false);
     setHistoryStartReached(false);
-}
-
-QString DmManager::currentUserId() const
-{
-    return extractUserIdFromToken(NetworkClient::accessToken());
 }

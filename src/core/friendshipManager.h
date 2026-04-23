@@ -63,7 +63,6 @@ signals:
     void unblockFailed(QString message);
 
 private:
-    NetworkClient       m_networkClient;
     FriendListModel     m_friends;
     PendingRequestModel m_pendingRequests;
     BlockListModel      m_blockedUsers;
