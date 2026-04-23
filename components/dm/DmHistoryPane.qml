@@ -32,35 +32,8 @@ Item {
         if (DmManager.messages.count === 0)
             return
 
-        scrollToBottomAnim.stop()
         historyList.forceLayout()
         historyList.positionViewAtBeginning()
-    }
-
-    function _smoothScrollToBottom() {
-        if (DmManager.messages.count === 0)
-            return
-
-        historyList.forceLayout()
-        const dist = historyPane._distanceFromBottom()
-        if (dist < 1) {
-            historyPane.autoScrollPending = false
-            Qt.callLater(historyPane._maybeAcknowledgeVisibleMessages)
-            return
-        }
-
-        if (dist > 600) {
-            historyPane._scrollHistoryToBottom()
-            historyPane.autoScrollPending = false
-            Qt.callLater(historyPane._maybeAcknowledgeVisibleMessages)
-            return
-        }
-
-        scrollToBottomAnim.stop()
-        scrollToBottomAnim.from = historyList.contentY
-        scrollToBottomAnim.to = historyList.contentY + dist
-        scrollToBottomAnim.duration = Math.min(300, Math.max(120, dist * 0.4))
-        scrollToBottomAnim.start()
     }
 
     function armOpenToLatest() {
@@ -75,7 +48,6 @@ Item {
     }
 
     function resetForConversationChange() {
-        scrollToBottomAnim.stop()
         historyPane.initialBottomScrollPending = true
     }
 
@@ -90,17 +62,12 @@ Item {
             return
         }
 
-        if (historyPane.initialBottomScrollPending || historyPane.ownSendPending) {
-            historyPane._scrollHistoryToBottom()
-            historyPane.autoScrollPending = false
-            historyPane.initialBottomScrollPending = false
-            historyPane.ownSendPending = false
-            Qt.callLater(historyPane._maybeAcknowledgeVisibleMessages)
-            Qt.callLater(historyPane._requestOlderMessagesIfNeeded)
-        } else {
-            historyPane.initialBottomScrollPending = false
-            historyPane._smoothScrollToBottom()
-        }
+        historyPane._scrollHistoryToBottom()
+        historyPane.autoScrollPending = false
+        historyPane.initialBottomScrollPending = false
+        historyPane.ownSendPending = false
+        Qt.callLater(historyPane._maybeAcknowledgeVisibleMessages)
+        Qt.callLater(historyPane._requestOlderMessagesIfNeeded)
     }
 
     function _requestOlderMessagesIfNeeded() {
@@ -197,7 +164,7 @@ Item {
 
         readonly property real sidePadding: 16
         readonly property real bottomPadding: 8
-        readonly property bool atBottom: historyPane._distanceFromBottom() <= 16
+        property bool atBottom: false
 
         header: Item {
             width: historyList.width
@@ -239,41 +206,23 @@ Item {
             }
         }
 
-        NumberAnimation {
-            id: scrollToBottomAnim
-
-            target: historyList
-            property: "contentY"
-            easing.type: Easing.OutCubic
-
-            onRunningChanged: {
-                if (!running && historyPane.autoScrollPending) {
-                    historyPane.autoScrollPending = false
-                    Qt.callLater(historyPane._maybeAcknowledgeVisibleMessages)
-                    Qt.callLater(historyPane._requestOlderMessagesIfNeeded)
-                }
-            }
-        }
-
-        onMovementStarted: scrollToBottomAnim.stop()
-
         onAtBottomChanged: {
             if (atBottom)
                 Qt.callLater(historyPane._maybeAcknowledgeVisibleMessages)
         }
 
         onContentYChanged: {
-            if (!scrollToBottomAnim.running
-                    && historyPane._distanceFromTop() <= historyPane.olderMessagesPrefetchDistance) {
+            historyList.atBottom = historyPane._distanceFromBottom() <= 16
+            if (historyPane._distanceFromTop() <= historyPane.olderMessagesPrefetchDistance) {
                 Qt.callLater(historyPane._requestOlderMessagesIfNeeded)
             }
         }
 
         onContentHeightChanged: {
+            historyList.atBottom = historyPane._distanceFromBottom() <= 16
             if (historyPane.autoScrollPending) {
                 Qt.callLater(historyPane._flushPendingAutoScroll)
-            } else if (!scrollToBottomAnim.running
-                    && historyPane._distanceFromTop() <= historyPane.olderMessagesPrefetchDistance) {
+            } else if (historyPane._distanceFromTop() <= historyPane.olderMessagesPrefetchDistance) {
                 Qt.callLater(historyPane._requestOlderMessagesIfNeeded)
             }
         }

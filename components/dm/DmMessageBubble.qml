@@ -23,7 +23,7 @@ Item {
 
         Rectangle {
             Layout.maximumWidth: messageRow.width * 0.72
-            implicitWidth: messageContent.implicitWidth + 24
+            Layout.preferredWidth: messageContent.implicitWidth + 24
             implicitHeight: messageContent.implicitHeight + 16
             radius: 18
             color: bubble.isSelf ? Theme.accentBlue : Theme.surfaceMid

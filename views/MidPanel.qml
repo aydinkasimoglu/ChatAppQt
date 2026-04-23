@@ -218,6 +218,7 @@ Rectangle {
                                 color: dmDelegate.hasUnread ? Theme.textMuted : Theme.textSubtle
                                 font.pixelSize: 12
                                 elide: Text.ElideRight
+                                maximumLineCount: 1
                             }
                         }
 
