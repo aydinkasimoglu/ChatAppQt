@@ -1,5 +1,7 @@
 #include "authclient.h"
 
+#include "networkClient.h"
+
 #include <QDateTime>
 #include <QEventLoop>
 #include <QJsonDocument>

@@ -9,7 +9,6 @@
 
 #include "dmConversationListModel.h"
 #include "dmMessageListModel.h"
-#include "networkClient.h"
 
 class DmManager : public QObject
 {

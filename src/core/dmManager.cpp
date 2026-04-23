@@ -1,5 +1,6 @@
 #include "dmManager.h"
 #include "authClient.h"
+#include "networkClient.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>

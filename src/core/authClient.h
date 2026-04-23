@@ -5,9 +5,8 @@
 #include <QTimer>
 #include <QJsonObject>
 #include <QtQml/qqml.h>
+#include <QNetworkReply>
 #include <qqmlintegration.h>
-
-#include "networkClient.h"
 
 class AuthClient : public QObject
 {
