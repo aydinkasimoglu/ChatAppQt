@@ -67,12 +67,15 @@ void DmConversationListModel::reset(const QJsonArray &conversations, const QStri
 {
     beginResetModel();
     m_conversations.clear();
+    m_conversationIds.clear();
 
     for (const QJsonValue &value : conversations) {
         if (!value.isObject())
             continue;
 
-        m_conversations.append(conversationFromJson(value.toObject(), currentUserId));
+        const ConversationItem item = conversationFromJson(value.toObject(), currentUserId);
+        m_conversationIds.insert(item.conversationId);
+        m_conversations.append(std::move(item));
     }
 
     endResetModel();
@@ -82,17 +85,13 @@ void DmConversationListModel::clear()
 {
     beginResetModel();
     m_conversations.clear();
+    m_conversationIds.clear();
     endResetModel();
 }
 
 bool DmConversationListModel::containsConversation(const QString &conversationId) const
 {
-    for (const ConversationItem &conversation : m_conversations) {
-        if (conversation.conversationId == conversationId)
-            return true;
-    }
-
-    return false;
+    return m_conversationIds.contains(conversationId);
 }
 
 QVariantMap DmConversationListModel::conversationById(const QString &conversationId) const
@@ -172,18 +171,10 @@ void DmConversationListModel::updateConversationFromMessage(const QString &conve
         }
     }
 
-    ConversationItem item;
+    if (foundIndex == -1)
+        return;
 
-    if (foundIndex != -1) {
-        // Remove it from its current position to move it to the top
-        beginRemoveRows({}, foundIndex, foundIndex);
-        item = m_conversations.takeAt(foundIndex);
-        endRemoveRows();
-    } else {
-        // If the conversation is brand new (not in the list), 
-        // fall back to fetching from the server.
-        return; 
-    }
+    ConversationItem &item = m_conversations[foundIndex];
 
     // 1. Update the snippet
     const QString senderId = message.value(QStringLiteral("sender_id")).toString();
@@ -199,12 +190,32 @@ void DmConversationListModel::updateConversationFromMessage(const QString &conve
     item.lastActivityAt = message.value(QStringLiteral("created_at")).toString();
 
     // 3. Increment unread count if it's from someone else and we aren't looking at it
-    if (!isCurrentOpenConversation && senderId != currentUserId) {
+    if (!isCurrentOpenConversation && senderId != currentUserId)
         item.unreadCount++;
-    }
 
-    // 4. Insert at the top of the list
-    beginInsertRows({}, 0, 0);
-    m_conversations.prepend(item);
-    endInsertRows();
+    // 4. Notify the view about changed data at the current position
+    const QModelIndex changedIdx = index(foundIndex);
+    emit dataChanged(changedIdx, changedIdx,
+                     {LastMessagePreviewRole, LastActivityAtRole, UnreadCountRole, HasUnreadRole});
+
+    // 5. Move atomically to the top (single model notification instead of remove + insert)
+    if (foundIndex > 0) {
+        beginMoveRows({}, foundIndex, foundIndex, {}, 0);
+        m_conversations.move(foundIndex, 0);
+        endMoveRows();
+    }
+}
+
+void DmConversationListModel::clearUnreadCount(const QString &conversationId)
+{
+    for (int i = 0; i < m_conversations.size(); ++i) {
+        if (m_conversations[i].conversationId == conversationId) {
+            if (m_conversations[i].unreadCount == 0)
+                return;
+            m_conversations[i].unreadCount = 0;
+            const QModelIndex idx = index(i);
+            emit dataChanged(idx, idx, {UnreadCountRole, HasUnreadRole});
+            return;
+        }
+    }
 }

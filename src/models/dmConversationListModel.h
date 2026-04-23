@@ -4,6 +4,7 @@
 #include <QAbstractListModel>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QSet>
 #include <QVariantMap>
 #include <qqmlintegration.h>
 
@@ -44,6 +45,7 @@ public:
                                        const QVariantMap &message, 
                                        const QString &currentUserId, 
                                        bool isCurrentOpenConversation);
+    void clearUnreadCount(const QString &conversationId);
 signals:
     void countChanged();
 
@@ -64,6 +66,7 @@ private:
     static QVariantMap toVariantMap(const ConversationItem &conversation);
 
     QList<ConversationItem> m_conversations;
+    QSet<QString> m_conversationIds;
 };
 
 #endif // DMCONVERSATIONLISTMODEL_H

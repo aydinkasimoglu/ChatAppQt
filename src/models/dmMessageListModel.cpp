@@ -98,7 +98,7 @@ void DmMessageListModel::reset(const QJsonArray &messages, const QString &curren
     m_messages.reserve(messageCount); 
     m_messageIds.reserve(messageCount);
 
-    for (int index = messageCount - 1; index >= 0; --index) {
+    for (int index = 0; index < messageCount; ++index) {
         const QJsonValue value = messages.at(index);
         if (!value.isObject())
             continue;
@@ -125,7 +125,7 @@ void DmMessageListModel::appendOlderPage(const QJsonArray &messages, const QStri
 
     constexpr QLatin1String messageIdKey("message_id");
 
-    for (int index = messages.size() - 1; index >= 0; --index) {
+    for (int index = 0; index < messages.size(); ++index) {
         const QJsonValue value = messages.at(index);
         if (!value.isObject())
             continue;
