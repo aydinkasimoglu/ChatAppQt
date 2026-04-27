@@ -96,6 +96,14 @@ QHash<int, QByteArray> DmMessageListModel::roleNames() const
     };
 }
 
+QString DmMessageListModel::bodyAt(const int row) const
+{
+    if (row < 0 || row >= m_messages.size())
+        return {};
+
+    return m_messages.at(row).body;
+}
+
 bool DmMessageListModel::shouldShowSenderInfo(const int row) const
 {
     const qsizetype messageCount = m_messages.size();

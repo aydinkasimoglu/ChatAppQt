@@ -12,6 +12,9 @@ Item {
     required property string timeLabel
     required property string createdAt
     required property string senderUsername
+    required property int selectionIndex
+    required property Item selectionSourceItem
+    required property var selectionController
 
     // False for consecutive messages from the same sender
     property bool showSenderInfo: true
@@ -24,6 +27,36 @@ Item {
     readonly property real contentLeftInset: bubble.avatarSize + bubble.avatarGap
     readonly property real contentWidth: Math.max(0, bubble.width - bubble.contentLeftInset)
     readonly property real messageMaxWidth: Math.min(bubble.contentWidth, bubble.width * 0.72)
+
+    function cursorPositionFromSourcePoint(sourceX, sourceY) {
+        const mappedPoint = messageContent.mapFromItem(bubble.selectionSourceItem, sourceX, sourceY);
+        const clampedX = Math.max(0, Math.min(mappedPoint.x, messageContent.width));
+        const clampedY = Math.max(0, Math.min(mappedPoint.y, messageContent.height));
+        return messageContent.positionAt(clampedX, clampedY);
+    }
+
+    function applySelectionRange(active, startPosition, endPosition) {
+        if (!active) {
+            messageContent.deselect();
+            return;
+        }
+
+        const maxPosition = messageContent.length;
+        const rangeStart = Math.max(0, Math.min(startPosition, maxPosition));
+        const rangeEnd = endPosition < 0
+                ? maxPosition
+                : Math.max(0, Math.min(endPosition, maxPosition));
+
+        if (rangeStart === rangeEnd) {
+            messageContent.deselect();
+            return;
+        }
+
+        messageContent.select(Math.min(rangeStart, rangeEnd), Math.max(rangeStart, rangeEnd));
+    }
+
+    Component.onCompleted: bubble.selectionController.registerSelectionBubble(bubble)
+    Component.onDestruction: bubble.selectionController.unregisterSelectionBubble(bubble)
 
     readonly property string fullTimeLabel: {
         const d = new Date(bubble.createdAt);
@@ -111,10 +144,36 @@ Item {
                     wrapMode: TextEdit.Wrap
 
                     readOnly: true
-                    selectByMouse: true
+                    selectByMouse: false
                     selectByKeyboard: true
                     selectedTextColor: bubble.isSelf ? Theme.accentBlue : "#ffffff"
                     selectionColor: bubble.isSelf ? Qt.rgba(1, 1, 1, 0.35) : Theme.accentBlue
+                }
+
+                MouseArea {
+                    id: selectionArea
+
+                    anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton
+                    cursorShape: Qt.IBeamCursor
+                    preventStealing: true
+
+                    onPressed: mouse => {
+                        const sourcePoint = selectionArea.mapToItem(bubble.selectionSourceItem, mouse.x, mouse.y);
+                        bubble.selectionController.beginTextSelection(bubble, sourcePoint.x, sourcePoint.y);
+                        mouse.accepted = true;
+                    }
+
+                    onPositionChanged: mouse => {
+                        if (!(mouse.buttons & Qt.LeftButton))
+                            return;
+
+                        const sourcePoint = selectionArea.mapToItem(bubble.selectionSourceItem, mouse.x, mouse.y);
+                        bubble.selectionController.updateTextSelection(sourcePoint.x, sourcePoint.y);
+                    }
+
+                    onReleased: bubble.selectionController.finishTextSelection()
+                    onCanceled: bubble.selectionController.finishTextSelection()
                 }
             }
 

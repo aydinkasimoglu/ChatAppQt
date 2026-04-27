@@ -33,6 +33,7 @@ public:
     int rowCount(const QModelIndex &parent = QModelIndex()) const override;
     QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
     QHash<int, QByteArray> roleNames() const override;
+    Q_INVOKABLE QString bodyAt(int row) const;
     Q_INVOKABLE bool shouldShowSenderInfo(int row) const;
 
     void reset(const QJsonArray &messages, const QString &currentUserId);
