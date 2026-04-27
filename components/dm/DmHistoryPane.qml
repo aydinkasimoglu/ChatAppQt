@@ -13,6 +13,8 @@ Item {
     required property bool hasConversation
     required property bool viewVisible
 
+    activeFocusOnTab: historyPane.hasConversation
+
     readonly property real olderMessagesPrefetchDistance: 800
     property bool autoScrollPending: false
     property bool initialBottomScrollPending: false
@@ -23,10 +25,17 @@ Item {
     property int selectionAnchorPosition: -1
     property int selectionFocusIndex: -1
     property int selectionFocusPosition: -1
+    property real selectionPointerContentX: 0
+    property real selectionPointerViewportY: 0
     property var selectionBubbles: []
 
-    readonly property bool hasTextSelection: selectionAnchorIndex >= 0
-                                            && selectionFocusIndex >= 0
+    readonly property real selectionEdgeAutoScrollZone: 48
+    readonly property real selectionEdgeAutoScrollStep: 24
+
+    readonly property bool hasSelectionCursor: selectionAnchorIndex >= 0
+                                                && selectionFocusIndex >= 0
+
+    readonly property bool hasTextSelection: hasSelectionCursor
                                             && (selectionAnchorIndex !== selectionFocusIndex
                                                 || selectionAnchorPosition !== selectionFocusPosition)
 
@@ -37,6 +46,173 @@ Item {
             return positionA <= positionB;
 
         return indexA > indexB;
+    }
+
+    function _updateSelectionPointer(contentX, contentY) {
+        selectionPointerContentX = contentX;
+        selectionPointerViewportY = contentY - historyList.contentY;
+    }
+
+    function _selectionAutoScrollDelta() {
+        if (!selectionDragActive || !historyList.visible || historyList.height <= 0)
+            return 0;
+
+        if (selectionPointerViewportY < 0) {
+            const topProgress = Math.min(selectionEdgeAutoScrollZone,
+                                         Math.max(0, -selectionPointerViewportY))
+                    / selectionEdgeAutoScrollZone;
+            return -selectionEdgeAutoScrollStep * topProgress;
+        }
+
+        if (selectionPointerViewportY > historyList.height) {
+            const bottomProgress = Math.min(selectionEdgeAutoScrollZone,
+                                            Math.max(0, selectionPointerViewportY - historyList.height))
+                    / selectionEdgeAutoScrollZone;
+            return selectionEdgeAutoScrollStep * bottomProgress;
+        }
+
+        return 0;
+    }
+
+    function _updateSelectionAutoScrollState() {
+        selectionAutoScrollTimer.running = selectionDragActive && _selectionAutoScrollDelta() !== 0;
+    }
+
+    function _stepSelectionAutoScroll() {
+        const delta = _selectionAutoScrollDelta();
+        if (delta === 0) {
+            selectionAutoScrollTimer.running = false;
+            return;
+        }
+
+        const minContentY = historyList.originY;
+        const maxContentY = historyList.originY + Math.max(0, historyList.contentHeight - historyList.height);
+        const nextContentY = Math.max(minContentY, Math.min(maxContentY, historyList.contentY + delta));
+        if (nextContentY === historyList.contentY) {
+            selectionAutoScrollTimer.running = false;
+            return;
+        }
+
+        historyList.contentY = nextContentY;
+        _updateSelectionFocus(selectionPointerContentX, historyList.contentY + selectionPointerViewportY);
+    }
+
+    function _messageBodyLength(index) {
+        return DmManager.messages.bodyAt(index).length;
+    }
+
+    function _setCollapsedSelection(index, position) {
+        selectionDragActive = false;
+        selectionDragMoved = false;
+        selectionAnchorIndex = index;
+        selectionAnchorPosition = position;
+        selectionFocusIndex = index;
+        selectionFocusPosition = position;
+        _refreshVisibleSelection();
+    }
+
+    function _ensureKeyboardSelectionStart() {
+        if (DmManager.messages.count === 0)
+            return false;
+
+        if (hasSelectionCursor)
+            return true;
+
+        _setCollapsedSelection(0, _messageBodyLength(0));
+        return true;
+    }
+
+    function _nextHorizontalSelectionPoint(index, position, direction) {
+        if (direction < 0) {
+            if (position > 0) {
+                return {
+                    index: index,
+                    position: position - 1,
+                };
+            }
+
+            if (index + 1 < DmManager.messages.count) {
+                return {
+                    index: index + 1,
+                    position: _messageBodyLength(index + 1),
+                };
+            }
+        } else if (direction > 0) {
+            const messageLength = _messageBodyLength(index);
+            if (position < messageLength) {
+                return {
+                    index: index,
+                    position: position + 1,
+                };
+            }
+
+            if (index - 1 >= 0) {
+                return {
+                    index: index - 1,
+                    position: 0,
+                };
+            }
+        }
+
+        return {
+            index: index,
+            position: position,
+        };
+    }
+
+    function _nextVerticalSelectionPoint(index, position, direction) {
+        const nextIndex = Math.max(0, Math.min(DmManager.messages.count - 1, index + direction));
+        return {
+            index: nextIndex,
+            position: Math.max(0, Math.min(position, _messageBodyLength(nextIndex))),
+        };
+    }
+
+    function _applyKeyboardSelectionPoint(point, extendSelection) {
+        if (extendSelection) {
+            selectionFocusIndex = point.index;
+            selectionFocusPosition = point.position;
+            _refreshVisibleSelection();
+        } else {
+            _setCollapsedSelection(point.index, point.position);
+        }
+
+        historyList.positionViewAtIndex(point.index, ListView.Visible);
+    }
+
+    function _moveSelectionHorizontally(direction, extendSelection) {
+        if (!_ensureKeyboardSelectionStart())
+            return false;
+
+        const point = _nextHorizontalSelectionPoint(selectionFocusIndex,
+                                                    selectionFocusPosition,
+                                                    direction);
+        _applyKeyboardSelectionPoint(point, extendSelection);
+        return true;
+    }
+
+    function _moveSelectionVertically(direction, extendSelection) {
+        if (!_ensureKeyboardSelectionStart())
+            return false;
+
+        const point = _nextVerticalSelectionPoint(selectionFocusIndex,
+                                                  selectionFocusPosition,
+                                                  direction);
+        _applyKeyboardSelectionPoint(point, extendSelection);
+        return true;
+    }
+
+    function selectAllText() {
+        if (DmManager.messages.count === 0)
+            return;
+
+        selectionDragActive = false;
+        selectionDragMoved = false;
+        selectionAnchorIndex = DmManager.messages.count - 1;
+        selectionAnchorPosition = 0;
+        selectionFocusIndex = 0;
+        selectionFocusPosition = _messageBodyLength(0);
+        _refreshVisibleSelection();
     }
 
     function _selectionBounds() {
@@ -199,6 +375,7 @@ Item {
         selectionAnchorPosition = -1;
         selectionFocusIndex = -1;
         selectionFocusPosition = -1;
+        selectionAutoScrollTimer.running = false;
         _refreshVisibleSelection();
     }
 
@@ -206,13 +383,16 @@ Item {
         if (!bubbleItem)
             return;
 
+        historyPane.forceActiveFocus();
         const anchorPosition = bubbleItem.cursorPositionFromSourcePoint(contentX, contentY);
+        _updateSelectionPointer(contentX, contentY);
         selectionDragActive = true;
         selectionDragMoved = false;
         selectionAnchorIndex = bubbleItem.selectionIndex;
         selectionAnchorPosition = anchorPosition;
         selectionFocusIndex = bubbleItem.selectionIndex;
         selectionFocusPosition = anchorPosition;
+        _updateSelectionAutoScrollState();
         _refreshVisibleSelection();
     }
 
@@ -220,7 +400,9 @@ Item {
         if (!selectionDragActive)
             return;
 
+        _updateSelectionPointer(contentX, contentY);
         _updateSelectionFocus(contentX, contentY);
+        _updateSelectionAutoScrollState();
     }
 
     function finishTextSelection() {
@@ -228,8 +410,9 @@ Item {
             return;
 
         selectionDragActive = false;
+        selectionAutoScrollTimer.running = false;
         if (!selectionDragMoved)
-            clearTextSelection();
+            _setCollapsedSelection(selectionFocusIndex, selectionFocusPosition);
     }
 
     function selectedText() {
@@ -263,6 +446,39 @@ Item {
         clipboardProxy.selectAll();
         clipboardProxy.copy();
         clipboardProxy.deselect();
+    }
+
+    Keys.onPressed: event => {
+        const extendSelection = (event.modifiers & Qt.ShiftModifier) !== 0;
+
+        switch (event.key) {
+        case Qt.Key_Left:
+            event.accepted = historyPane._moveSelectionHorizontally(-1, extendSelection);
+            break;
+        case Qt.Key_Right:
+            event.accepted = historyPane._moveSelectionHorizontally(1, extendSelection);
+            break;
+        case Qt.Key_Up:
+            event.accepted = historyPane._moveSelectionVertically(1, extendSelection);
+            break;
+        case Qt.Key_Down:
+            event.accepted = historyPane._moveSelectionVertically(-1, extendSelection);
+            break;
+        case Qt.Key_A:
+            if ((event.modifiers & Qt.ControlModifier) !== 0) {
+                historyPane.selectAllText();
+                event.accepted = true;
+            }
+            break;
+        case Qt.Key_Escape:
+            if (historyPane.hasSelectionCursor) {
+                historyPane.clearTextSelection();
+                event.accepted = true;
+            }
+            break;
+        default:
+            break;
+        }
     }
 
     function _distanceFromTop() {
@@ -390,6 +606,15 @@ Item {
         textFormat: TextEdit.PlainText
     }
 
+    Timer {
+        id: selectionAutoScrollTimer
+
+        interval: 16
+        repeat: true
+        running: false
+        onTriggered: historyPane._stepSelectionAutoScroll()
+    }
+
     Component {
         id: introFooterComponent
 
@@ -481,6 +706,8 @@ Item {
         onContentYChanged: {
             historyList.atBottom = historyPane._distanceFromBottom() <= 16
             historyPane._refreshVisibleSelection()
+            if (historyPane.selectionDragActive)
+                historyPane._updateSelectionAutoScrollState()
             if (historyPane._distanceFromTop() <= historyPane.olderMessagesPrefetchDistance) {
                 Qt.callLater(historyPane._requestOlderMessagesIfNeeded)
             }
