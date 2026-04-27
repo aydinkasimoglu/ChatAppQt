@@ -1,12 +1,22 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Effects
 import "."
 import "../.."
 
 Rectangle {
     id: root
+
+    RectangularShadow {
+        anchors.fill: root
+        radius: root.radius
+        blur: 12
+        spread: 0
+        color: "#22000000"
+    }
 
     required property bool canCompose
     required property string conversationTitle
@@ -16,7 +26,7 @@ Rectangle {
     property alias text: messageInput.text
 
     implicitHeight: Math.max(44, inputRow.implicitHeight + 12)
-    radius: 8
+    radius: 16
     color: Theme.surfaceMid
     opacity: root.canCompose ? 1.0 : 0.72
 
@@ -39,94 +49,161 @@ Rectangle {
     RowLayout {
         id: inputRow
 
-        anchors.fill: parent
-        anchors.leftMargin: 16
-        anchors.rightMargin: 8
-        anchors.topMargin: 6
-        anchors.bottomMargin: 6
-        spacing: 8
+        anchors {
+            fill: parent
+            leftMargin: 22
+            rightMargin: 22
+        }
+        spacing: 6
 
-        Item {
-            Layout.fillWidth: true
-            Layout.alignment: Qt.AlignVCenter
+        RoundButton {
+            id: attachButton
 
-            readonly property real lineH: messageInput.font.pixelSize * 1.45
-            implicitHeight: Math.min(messageInput.contentHeight, lineH * 5)
+            Layout.preferredWidth: 30
+            Layout.preferredHeight: 30
+            flat: true
+            padding: 5
 
-            Text {
-                anchors.fill: parent
-                visible: !messageInput.activeFocus && messageInput.length === 0
-                text: root.canCompose
-                      ? qsTr("Message @%1").arg(root.conversationTitle)
-                      : "Select a conversation to start messaging"
-                color: Theme.textSubtle
-                font: messageInput.font
-                verticalAlignment: Text.AlignVCenter
-            }
+            icon.source: "/assets/icons/plus.svg"
+            icon.color: "white"
 
-            TextEdit {
-                id: messageInput
+            background: Rectangle {
+                color: attachButton.hovered ? Theme.surfaceRaised : "transparent"
+                radius: 8
+                scale: attachButton.hovered ? 1.08 : 0.45
+                transformOrigin: Item.Center
 
-                anchors.fill: parent
-                color: Theme.textPrimary
-                font.pixelSize: 14
-                selectionColor: "#8a93f7"
-                selectedTextColor: Theme.textPrimary
-                wrapMode: TextEdit.Wrap
-                enabled: root.canCompose
-                activeFocusOnTab: true
-                clip: true
-
-                Keys.onReturnPressed: (event) => {
-                    if (event.modifiers & Qt.ShiftModifier) {
-                        event.accepted = false
-                    } else {
-                        root.submit()
-                        event.accepted = true
+                Behavior on color {
+                    ColorAnimation {
+                        duration: Theme.animFast
+                        easing.type: Easing.OutCubic
                     }
                 }
 
-                Keys.onEscapePressed: (event) => {
-                    root.blurInput()
+                Behavior on scale {
+                    NumberAnimation {
+                        duration: Theme.animMid
+                        easing.type: Easing.OutBack
+                    }
+                }
+            }
+            
+            onClicked: console.log("Attach clicked")
+
+            ToolTip {
+                id: attachTooltip
+                text: qsTr("Attach")
+                delay: 1000
+                visible: attachButton.hovered
+                padding: 8
+
+                contentItem: Text {
+                    text: attachTooltip.text
+                    font: attachTooltip.font
+                    color: Theme.textSecondary
+                }
+
+                background: Rectangle {
+                    color: Theme.surfaceDeep
+                    border.color: Theme.surfaceBorder
+                    border.width: 1
+                    radius: 6
                 }
             }
         }
 
-        Rectangle {
-            width: 32
-            height: 32
-            radius: 8
-            opacity: root.canCompose && messageInput.length > 0 ? 1.0 : 0.0
-            visible: opacity > 0
-            color: sendHover.hovered ? Qt.lighter(Theme.accentBlue, 1.15) : Theme.accentBlue
+        TextField {
+            id: messageInput
 
-            Behavior on opacity {
-                NumberAnimation { duration: 120 }
+            Layout.fillWidth: true
+            Layout.alignment: Qt.AlignVCenter
+
+            color: Theme.textPrimary
+
+            background: Item {}
+            font.pixelSize: 14
+            selectionColor: "#8a93f7"
+            selectedTextColor: Theme.textPrimary
+            wrapMode: TextField.Wrap
+            enabled: root.canCompose
+            activeFocusOnTab: true
+            clip: true
+
+            placeholderText: root.canCompose
+                    ? qsTr("Message @%1").arg(root.conversationTitle)
+                    : "Select a conversation to start messaging"
+            placeholderTextColor: Theme.textSubtle
+
+            Keys.onReturnPressed: (event) => {
+                if (event.modifiers & Qt.ShiftModifier) {
+                    event.accepted = false
+                } else {
+                    root.submit()
+                    event.accepted = true
+                }
             }
 
-            Behavior on color {
-                ColorAnimation { duration: 100 }
+            Keys.onEscapePressed: (event) => {
+                root.blurInput()
+            }
+        }
+
+        RoundButton {
+            id: sendButton
+
+            Layout.preferredWidth: 30
+            Layout.preferredHeight: 30
+
+            flat: true
+            padding: 5
+            enabled: root.canCompose && messageInput.text.trim().length > 0
+
+            icon.source: "/assets/icons/paper_plane.svg"
+            icon.color: "white"
+
+            background: Rectangle {
+                color: sendButton.hovered && sendButton.enabled ? Theme.surfaceRaised : "transparent"
+                radius: 8
+
+                scale: sendButton.hovered ? 1.08 : 0.45
+                transformOrigin: Item.Center
+
+                Behavior on color {
+                    ColorAnimation {
+                        duration: Theme.animFast
+                        easing.type: Easing.OutCubic
+                    }
+                }
+
+                Behavior on scale {
+                    NumberAnimation {
+                        duration: Theme.animMid
+                        easing.type: Easing.OutBack
+                    }
+                }
             }
 
-            HoverHandler {
-                id: sendHover
-            }
+            onClicked: root.submit()
 
-            TapHandler {
-                onTapped: root.submit()
-            }
+            ToolTip {
+                id: sendTooltip
+                text: qsTr("Send")
+                delay: 1000
+                visible: sendButton.hovered
+                padding: 8
 
-            Image {
-                anchors.centerIn: parent
-                source: "/assets/icons/arrow_upward.svg"
-                width: 16
-                height: 16
-                sourceSize.width: width * Screen.devicePixelRatio
-                sourceSize.height: height * Screen.devicePixelRatio
-                smooth: true
-                mipmap: true
-                Layout.preferredWidth: 16
-                Layout.preferredHeight: 16
+                contentItem: Text {
+                    text: sendTooltip.text
+                    font: sendTooltip.font
+                    color: Theme.textSecondary
+                }
+
+                background: Rectangle {
+                    color: Theme.surfaceDeep
+                    border.color: Theme.surfaceBorder
+                    border.width: 1
+                    radius: 6
+                }
             }
         }
     }

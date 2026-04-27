@@ -99,7 +99,7 @@ Item {
                 radius: 5
                 color: bubble.isSelf ? Theme.accentBlue : Theme.surfaceMid
 
-                Text {
+                TextEdit {
                     id: messageContent
 
                     x: bubble.bubbleHorizontalPadding
@@ -108,7 +108,13 @@ Item {
                     text: bubble.body
                     color: bubble.isSelf ? "#ffffff" : Theme.textPrimary
                     font.pixelSize: 14
-                    wrapMode: Text.Wrap
+                    wrapMode: TextEdit.Wrap
+
+                    readOnly: true
+                    selectByMouse: true
+                    selectByKeyboard: true
+                    selectedTextColor: bubble.isSelf ? Theme.accentBlue : "#ffffff"
+                    selectionColor: bubble.isSelf ? Qt.rgba(1, 1, 1, 0.35) : Theme.accentBlue
                 }
             }
 

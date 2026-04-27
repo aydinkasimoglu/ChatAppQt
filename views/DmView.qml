@@ -80,7 +80,7 @@ Rectangle {
             Layout.fillWidth: true
             Layout.leftMargin: 16
             Layout.rightMargin: 16
-            Layout.bottomMargin: 24
+            Layout.bottomMargin: 16
             canCompose: dmViewRoot.canCompose
             conversationTitle: dmViewRoot.conversationTitle
             onSendRequested: (text) => dmViewRoot._send(text)
