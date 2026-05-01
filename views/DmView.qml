@@ -7,7 +7,7 @@ import "../components/dm"
 Rectangle {
     id: dmViewRoot
 
-    color: Theme.surfaceRaised
+    color: Theme.surfaceDeep
 
     required property string conversationId
     required property string conversationTitle
@@ -63,27 +63,42 @@ Rectangle {
             conversationTitle: dmViewRoot.conversationTitle
         }
 
-        DmHistoryPane {
-            id: historyPane
-
+        Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            conversationId: dmViewRoot.conversationId
-            conversationTitle: dmViewRoot.conversationTitle
-            hasConversation: dmViewRoot.hasConversation
-            viewVisible: dmViewRoot.visible
+            Layout.margins: 12
+            color: Theme.surfaceMid
+            radius: 15
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 12
+                spacing: 0
+
+                DmHistoryPane {
+                    id: historyPane
+
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    conversationId: dmViewRoot.conversationId
+                    conversationTitle: dmViewRoot.conversationTitle
+                    hasConversation: dmViewRoot.hasConversation
+                    viewVisible: dmViewRoot.visible
+                }
+
+                DmComposer {
+                    id: composer
+
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 4
+                    Layout.rightMargin: 4
+                    Layout.bottomMargin: 4
+                    canCompose: dmViewRoot.canCompose
+                    conversationTitle: dmViewRoot.conversationTitle
+                    onSendRequested: (text) => dmViewRoot._send(text)
+                }
+            }
         }
 
-        DmComposer {
-            id: composer
-
-            Layout.fillWidth: true
-            Layout.leftMargin: 16
-            Layout.rightMargin: 16
-            Layout.bottomMargin: 16
-            canCompose: dmViewRoot.canCompose
-            conversationTitle: dmViewRoot.conversationTitle
-            onSendRequested: (text) => dmViewRoot._send(text)
-        }
     }
 }

@@ -56,6 +56,7 @@ qt_add_qml_module(appChatApp
         src/models/blockListModel.h
         src/models/serverListModel.cpp
         src/models/serverListModel.h
+        src/helpers/clipboardHelper.h
     QML_FILES
         Main.qml
         components/AddServerButton.qml
@@ -83,6 +84,7 @@ qt_add_qml_module(appChatApp
         components/dm/DmHeaderBar.qml
         components/dm/DmHistoryIntro.qml
         components/dm/DmHistoryPane.qml
+        components/dm/DmHistorySelectionController.qml
         components/dm/DmMessageBubble.qml
         components/dialogs/CreateServerDialog.qml
         views/AuthView.qml
@@ -103,6 +105,7 @@ qt_add_resources(appChatApp PRIVATE
 target_include_directories(appChatApp PRIVATE
     src/core
     src/models
+    src/helpers
 )
 
 set_target_properties(appChatApp PROPERTIES

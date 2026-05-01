@@ -3,11 +3,11 @@ import QtQuick
 
 QtObject {
     // ── Surfaces ──────────────────────────────────────────
-    readonly property color surfaceDeep:    "#1e1f22"
-    readonly property color surfaceMid:     "#2b2d31"
-    readonly property color surfaceRaised:  "#313338"
+    readonly property color surfaceDeep:    "#000"
+    readonly property color surfaceMid:     "#1A1A1A"
+    readonly property color surfaceRaised:  "#303030"
     readonly property color surfaceBorder:  "#35363c"
-    readonly property color surfaceHover:   "#35373c"
+    readonly property color surfaceHover:   "#262626"
 
     // ── Text ──────────────────────────────────────────────
     readonly property color textPrimary:    "#f2f3f5"

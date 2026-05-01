@@ -11,7 +11,7 @@ Rectangle {
     property string activeItemId: "friends"
 
     width: Theme.midPanelWidth
-    color: Theme.surfaceMid
+    color: Theme.surfaceDeep
 
     readonly property var avatarPalette: [
         "#5865F2", "#57F287", "#FEE75C", "#EB459E",
@@ -133,7 +133,7 @@ Rectangle {
 
                 anchors.fill: parent
                 clip: true
-                spacing: 2
+                spacing: 8
                 visible: DmManager.conversations.count > 0
                 model: DmManager.conversations
 
@@ -152,10 +152,10 @@ Rectangle {
 
                     Rectangle {
                         anchors.fill: parent
-                        radius: 4
+                        radius: 12
                         color: midPanelRoot.activeItemId === dmDelegate.conversationId
                                ? Theme.surfaceRaised
-                               : (dmHover.hovered ? Qt.rgba(1, 1, 1, 0.06) : "transparent")
+                               : (dmHover.hovered ? Theme.surfaceRaised : Theme.surfaceMid)
                         Behavior on color { ColorAnimation { duration: Theme.animFast } }
                     }
 

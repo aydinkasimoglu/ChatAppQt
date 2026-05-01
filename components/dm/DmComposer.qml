@@ -27,7 +27,7 @@ Rectangle {
 
     implicitHeight: Math.max(44, inputRow.implicitHeight + 12)
     radius: 16
-    color: Theme.surfaceMid
+    color: Theme.surfaceRaised
     opacity: root.canCompose ? 1.0 : 0.72
 
     function clear() {
